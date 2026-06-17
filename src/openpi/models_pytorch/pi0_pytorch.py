@@ -379,7 +379,9 @@ class PI0Pytorch(nn.Module):
             with torch.no_grad():
                 return self._sample_actions_impl(device, observation, noise=noise, num_steps=num_steps)
         with torch.enable_grad():
-            return self._sample_actions_impl(device, observation, noise=noise, num_steps=num_steps, rtc_guidance=rtc_guidance)
+            return self._sample_actions_impl(
+                device, observation, noise=noise, num_steps=num_steps, rtc_guidance=rtc_guidance
+            )
 
     def _sample_actions_impl(self, device, observation, noise=None, num_steps=10, rtc_guidance=None) -> Tensor:
         """执行 flow matching 采样，可选加入 RTC guided velocity correction。"""
@@ -413,7 +415,7 @@ class PI0Pytorch(nn.Module):
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
         while time >= -dt / 2:
             if rtc_guidance is not None:
-                x_t = x_t.detach().requires_grad_(True)
+                x_t = x_t.detach().requires_grad_(requires_grad=True)
             expanded_time = time.expand(bsize)
             v_t = self.denoise_step(
                 state,

@@ -120,6 +120,9 @@ ignore = [
     "PD008",  # Lots of false positives.
     "ISC001", # Disabling to support ruff format.
     "LOG015", # Use logger.info.
+    "RUF001", # Allow fullwidth punctuation in Chinese notes.
+    "RUF002", # Allow fullwidth punctuation in Chinese notes.
+    "RUF003", # Allow fullwidth punctuation in Chinese notes.
 ]
 unfixable = [
     "B905", # Fix defaults to strict=False, which is not what we want.

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from bodyctrl_msgs.msg import CmdSetMotorPosition
+from bodyctrl_msgs.msg import MotorStatusMsg
+from bodyctrl_msgs.msg import SetMotorPosition
 import cv2
 import numpy as np
 from openpi_client import image_tools
@@ -9,13 +12,8 @@ from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy
 from rclpy.qos import QoSProfile
 from rclpy.qos import QoSReliabilityPolicy
-
-from bodyctrl_msgs.msg import CmdSetMotorPosition
-from bodyctrl_msgs.msg import MotorStatusMsg
-from bodyctrl_msgs.msg import SetMotorPosition
-
-from tienkung_config import Args
 from tienkung_config import MODEL_IMAGE_SIZE
+from tienkung_config import Args
 from tienkung_config import RobotLayout
 
 try:

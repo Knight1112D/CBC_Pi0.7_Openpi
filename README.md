@@ -1,30 +1,30 @@
 # CBC_Pi0.7_Openpi
 
-## 项目说明
+## Overview
 
-本项目基于 Physical Intelligence 团队开源的 [`openpi`](https://github.com/Physical-Intelligence/openpi) 项目开展二次研究和工程复现。首先感谢 Physical Intelligence 团队公开 `openpi` 代码、训练/推理示例、模型配置、远程推理流程，以及 `pi0`、`pi0-FAST`、`pi0.5` 相关基础能力；没有这些基础工作，本项目无法快速在天工机器人上建立 VLA 训练与部署链路。
+`CBC_Pi0.7_Openpi` is an unofficial, personal research and engineering attempt to build a more complete OpenPI-style VLA project for humanoid robots.
 
-本仓库不是 Physical Intelligence 官方项目，也不代表官方实现。本项目会尽量保留 upstream 贡献、许可证和引用关系，并在自己的实验代码中明确区分：
+The project is built on top of Physical Intelligence's open-source [`openpi`](https://github.com/Physical-Intelligence/openpi) repository. I am grateful to the Physical Intelligence team for releasing the OpenPI codebase, model definitions, training and inference examples, remote policy-server workflow, and public `pi0`, `pi0-FAST`, and `pi0.5` assets. This repository would not be possible without that foundation.
 
-- 官方 `openpi` 已开源的能力。
-- 论文、博客或公开材料中描述但尚未在 `openpi` 中完整开源的能力。
-- 本项目基于公开资料、第三方复现和本地实验做出的工程尝试。
+This repository is not affiliated with or endorsed by Physical Intelligence. It is a community-oriented experiment intended to help others learn how to adapt open-source VLAs to humanoid robots, while also exploring research ideas that have not yet been released as a complete OpenPI implementation.
 
-原始 `openpi` README 已保存在 [UPSTREAM_OPENPI_README.md](UPSTREAM_OPENPI_README.md)，便于查看官方安装、训练、推理和模型说明。
+The original upstream OpenPI README is preserved here:
 
-## 上游项目贡献
+- [UPSTREAM_OPENPI_README.md](UPSTREAM_OPENPI_README.md)
 
-本项目主要继承并使用了 `openpi` 的以下贡献：
+## Upstream Credit
 
-- `pi0` flow-based VLA 模型框架。
-- `pi0-FAST` autoregressive VLA 与 FAST action tokenizer 相关工程入口。
-- `pi0.5` flow matching head 的训练与推理路径。
-- 自定义机器人数据接入范式：policy transform、LeRobot data config、train config、norm stats、policy server。
-- PyTorch/JAX 训练与推理代码结构。
-- 远程 websocket policy server/client 方案。
-- DROID、ALOHA、LIBERO、UR5 等示例工程。
+This repository inherits and builds on the following upstream OpenPI contributions:
 
-引用与致谢：
+- `pi0`, a flow-based vision-language-action model.
+- `pi0-FAST`, an autoregressive VLA based on the FAST action tokenizer.
+- `pi0.5`, including the publicly released flow-matching training and inference path.
+- The policy transform, LeRobot data config, training config, normalization-statistics, and policy-server patterns used to adapt OpenPI to new robot embodiments.
+- JAX and PyTorch model/training structure.
+- Remote websocket policy serving.
+- Reference examples for DROID, ALOHA, LIBERO, UR5, and related workflows.
+
+Primary upstream references:
 
 - OpenPI GitHub: <https://github.com/Physical-Intelligence/openpi>
 - Physical Intelligence: <https://www.physicalintelligence.company/>
@@ -33,91 +33,95 @@
 - pi0.5: <https://www.physicalintelligence.company/blog/pi05>
 - Knowledge Insulation: <https://www.physicalintelligence.company/research/knowledge_insulation>
 
-## 本项目目标
+## Project Goal
 
-当前官方 `openpi` 已经提供 `pi0`、`pi0-FAST` 和 `pi0.5` 的公开训练/推理基础，但更后续的一些高级能力还没有以完整工程形式开源到 `openpi` 中。本项目希望在官方 `openpi` 基础上，围绕天工机器人和通用 VLA 能力，逐步复现与工程化以下方向：
+OpenPI currently provides a strong open-source base for `pi0`, `pi0-FAST`, and `pi0.5`. Several later capabilities discussed in public materials are not yet available as a full open-source OpenPI engineering stack.
 
-- `pi0.5` 高级语义和 knowledge insulation 相关能力在自定义机器人上的可用训练流程。
-- RTC/action chunking：异步推理、延迟估计、chunk suffix 融合、模型侧 guidance、训练期 delay conditioning。
-- `pi0.6` 风格的 RECAP/RL：success/failure、human intervention、value proxy、advantage labeling、advantage-conditioned policy。
-- MEM 相关的记忆、上下文和任务恢复能力。
-- `pi0.7` 论文/公开材料中世界模型、视觉子目标、交互式上下文和长程任务规划相关思想的工程尝试。
+This project aims to explore, reproduce, and teach the engineering path toward those capabilities on humanoid robots:
 
-## 当前进度
+- Open-source VLA deployment on humanoid robots.
+- `pi0.5`-style higher-level semantic generalization and knowledge-insulation-inspired experiments.
+- RTC / real-time action chunking for remote VLA inference.
+- `pi0.6`-style RECAP, RL, human intervention labels, value proxies, and advantage-conditioned policies.
+- MEM-style memory, task context, and recovery mechanisms.
+- `pi0.7`-inspired world-model, visual-subgoal, interactive-context, and long-horizon planning ideas.
 
-- 已在远程服务器 `A100_8:/data/caobochun/openpi` 部署 openpi。
-- 已把天工机器人双手数据转换为 LeRobot 训练格式。
-- 已基于 `pi0.5` 训练出天工机器人 VLA policy。
-- 已实现天工 policy transform、训练 config、数据转换脚本、离线评估脚本和异步/RTC 部署客户端雏形。
-- 已建立本地代码镜像 `/data/Openpi_CBC_Upgrade/openpi`，用于快速检查、编辑和同步到 A100_8 验证。
-- 已建立同步脚本和 Codex skill，用于本地与 A100_8 双向同步。
+The target robot platform is intentionally not fixed. The project is meant to be useful for humanoid robots in general, and future experiments may use different humanoid platforms.
 
-## Todo List
+## Related Project
 
-### 1. 项目基线
+For one concrete humanoid VLA data-collection pipeline, see my separate project:
 
-- [x] 保留并引用 upstream `openpi` 项目。
-- [x] 建立天工机器人 `pi0.5` 训练基线。
-- [x] 建立本地代码镜像与 A100_8 同步流程。
-- [x] 建立 GitHub 项目说明和进度记录。
-- [ ] 整理天工训练/评估最小复现命令。
-- [ ] 将当前实验配置、数据路径、checkpoint 约定整理成独立文档。
+- [Knight1112D/Tienkung_vla_collect_data](https://github.com/Knight1112D/Tienkung_vla_collect_data)
 
-### 2. pi0.5 高级语义与 knowledge insulation
+That repository is a data-collection reference. This repository is focused on adapting and extending OpenPI-style VLA training, inference, real-time execution, and higher-level model capabilities.
 
-- [ ] 梳理官方 `pi0.5` 已开源实现与论文/博客描述之间的差距。
-- [ ] 在天工数据上验证 prompt、task context、视觉语义变化对动作输出的影响。
-- [ ] 设计多任务或多场景数据混合实验，观察语义泛化能力。
-- [ ] 尝试可控的冻结/解冻、adapter、数据重加权或 knowledge-insulation-style 实验。
+## Roadmap
 
-### 3. RTC / Real-Time Chunking
+### 1. OpenPI Foundation
 
-- [x] 建立异步 policy client 与 action chunk 执行雏形。
-- [x] 建立 RTC chunker 的初步实现。
-- [ ] 增加离线 replay 模式，不发布机器人动作即可测试延迟和 chunk 融合。
-- [ ] 对比 async baseline、固定 horizon RTC、delay-adaptive RTC、suffix soft blend。
-- [ ] 验证模型侧 RTC guidance 的 shape、归一化和采样稳定性。
-- [ ] 尝试训练期 simulated delay conditioning。
+- [x] Preserve upstream OpenPI credit, license files, and README reference.
+- [x] Keep the project as a code-only mirror with no model weights, datasets, virtual environments, or training logs.
+- [x] Add a public project README explaining the unofficial scope.
+- [ ] Provide minimal reproducible commands for code-only setup and smoke tests.
+- [ ] Document how to adapt a new humanoid robot dataset to OpenPI policy transforms and LeRobot data configs.
 
-### 4. pi0.6 RECAP / RL
+### 2. Humanoid VLA Deployment
 
-- [ ] 参考公开 RECAP 复现项目，设计天工 episode metadata 和 sidecar label 格式。
-- [ ] 增加 success/failure、human intervention、eval episode 标注。
-- [ ] 实现 value proxy 或 progress proxy，生成 frame-level advantage label。
-- [ ] 在 dataloader 中合并 `advantage_indicator`、`use_advantage`、`is_human_intervention`。
-- [ ] 增加 advantage-conditioned prompt/token/embedding 路径。
-- [ ] 增加 RECAP debug config，先跑 1-2 step smoke test。
-- [ ] 对比普通 SFT 与 RECAP-style finetune 的离线指标。
+- [ ] Define a generic humanoid observation/action adapter interface.
+- [ ] Provide a safe dry-run client that never publishes robot actions.
+- [ ] Provide replay-mode inference for testing policy-server latency and action chunks offline.
+- [ ] Document action normalization, joint ordering, limits, frequency, interpolation, and emergency-stop checks.
+- [ ] Add examples for swapping robot-specific ROS or middleware bridges.
 
-### 5. MEM / 记忆机制
+### 3. pi0.5-Style Semantics
 
-- [ ] 调研 MEM 公开材料和可复现工程线索。
-- [ ] 设计短期历史、任务上下文、失败原因和恢复提示的数据结构。
-- [ ] 实现不破坏旧 policy 输入的可选 context 字段。
-- [ ] 在离线评估中测试有无记忆上下文的输出差异。
+- [ ] Compare the public `pi0.5` implementation with the public descriptions of higher-level semantic generalization.
+- [ ] Test prompt sensitivity, task context, and visual semantic changes on humanoid manipulation datasets.
+- [ ] Explore multi-task or multi-scene mixtures for semantic generalization.
+- [ ] Try controlled freezing, adapters, data weighting, or knowledge-insulation-inspired training recipes.
 
-### 6. pi0.7 世界模型与长程交互
+### 4. RTC / Real-Time Chunking
 
-- [ ] 梳理 pi0.7 论文/博客/公开材料中的核心模块。
-- [ ] 设计 world-model-style 中间表示或 visual subgoal 输入格式。
-- [ ] 尝试用关键帧、子目标或语言分解增强 VLA policy 调用。
-- [ ] 建立长程任务评估样例，记录成功率、失败模式和恢复过程。
-- [ ] 明确哪些内容是论文思想复现，哪些是本项目工程假设。
+- [ ] Implement offline delay simulation and replay evaluation.
+- [ ] Compare async baseline, fixed-horizon RTC, delay-adaptive RTC, and suffix soft blending.
+- [ ] Validate model-side RTC guidance in the flow-matching sampling loop.
+- [ ] Explore training-time delay conditioning.
+- [ ] Report metrics such as latency, replan frequency, action smoothness, and rollout stability.
 
-### 7. 天工真机验证
+### 5. pi0.6-Style RECAP / RL
 
-- [ ] 真机前重新确认 26 维动作顺序、限幅、频率、插值和急停。
-- [ ] 增加 dry-run/replay/只读观测模式。
-- [ ] 小范围验证 policy server 延迟、图像状态同步和动作曲线。
-- [ ] 记录失败样本，反哺 RECAP/RL 数据闭环。
+- [ ] Define generic episode metadata for success, failure, evaluation episodes, and human intervention.
+- [ ] Generate sidecar labels for `advantage_indicator`, `use_advantage`, and `is_human_intervention`.
+- [ ] Add value-proxy or progress-proxy tools for offline advantage labeling.
+- [ ] Merge RECAP sidecar fields into the dataloader without modifying the original dataset.
+- [ ] Add advantage-conditioned prompt, token, or embedding paths.
+- [ ] Add a small debug config for 1-2 step smoke tests.
+- [ ] Compare standard SFT and RECAP-style fine-tuning.
 
-## 开发约定
+### 6. MEM / Memory
 
-- 本仓库只提交代码、配置、文档和小型脚本。
-- 不提交模型权重、checkpoint、训练数据、虚拟环境、日志、wandb 或评估大文件。
-- 远端训练与验证默认在 `A100_8:/data/caobochun/openpi` 进行。
-- 本地快速检查默认在 `/data/Openpi_CBC_Upgrade/openpi` 进行。
+- [ ] Survey public MEM-related materials and reproducible implementation clues.
+- [ ] Design optional memory/context fields for recent history, task state, failures, and recovery hints.
+- [ ] Keep memory inputs optional so existing OpenPI policies remain compatible.
+- [ ] Evaluate behavior with and without memory context.
+
+### 7. pi0.7-Inspired World Model
+
+- [ ] Summarize public pi0.7 paper/blog concepts and separate them from project assumptions.
+- [ ] Design world-model-style intermediate representations or visual-subgoal inputs.
+- [ ] Explore keyframes, subgoals, and language decomposition as policy context.
+- [ ] Build long-horizon humanoid task examples and track success, failure modes, and recovery.
+
+## Repository Policy
+
+- No model weights.
+- No private datasets.
+- No virtual environments.
+- No machine-specific logs or experiment artifacts.
+- Keep upstream OpenPI attribution visible.
+- Clearly label unofficial reproduction code and speculative engineering experiments.
 
 ## License
 
-本项目保留 upstream `openpi` 的许可证文件和第三方依赖声明。新增代码和文档在不冲突的前提下遵循原项目许可证约束；涉及第三方复现项目或论文思想时，会在对应文件中补充来源说明。
+This repository preserves the upstream OpenPI license files and third-party notices. New code and documentation should remain compatible with upstream licensing constraints. Any third-party reproduction work or paper-inspired implementation should include source notes in the relevant files.

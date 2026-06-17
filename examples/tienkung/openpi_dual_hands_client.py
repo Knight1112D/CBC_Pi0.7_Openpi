@@ -8,20 +8,19 @@ import os
 from pathlib import Path
 import time
 
+from async_policy import AsyncPolicyProcess
 import numpy as np
 import rclpy
 from rclpy.node import Node
-import tyro
-
-from async_policy import AsyncPolicyProcess
 from ros_io import COMPRESSED_IMAGE_MSG
 from ros_io import TienkungRosIO
 from rtc_chunker import RtcChunker
-from tienkung_config import Args
 from tienkung_config import STATE_DIM
+from tienkung_config import Args
 from tienkung_config import build_robot_layout
 from tienkung_config import merge_config_file
 from trajectory import make_execution_plan
+import tyro
 
 
 class TienkungDualHandsController(Node):
@@ -194,7 +193,9 @@ class TienkungDualHandsRtcController(Node):
             upper_limits=self.layout.upper_limits,
         )
         merged_plan, observed_delay = self.rtc.accept_new_chunk(result["request_id"], plan)
-        self.last_model_chunk = np.asarray(result["actions"], dtype=np.float32)[: self.args.max_action_chunk_len, :STATE_DIM]
+        self.last_model_chunk = np.asarray(result["actions"], dtype=np.float32)[
+            : self.args.max_action_chunk_len, :STATE_DIM
+        ]
         if self.args.save_action_chunks:
             np.savez_compressed(
                 self.log_dir / f"rtc_action_chunk_{self.inference_idx:06d}.npz",

@@ -17,15 +17,11 @@ import tyro
 from openpi.policies import policy_config
 from openpi.training import config as training_config
 
-
 DEFAULT_CHECKPOINT = Path(
-    "/data/caobochun/openpi/checkpoints/pi05_tienkung_finetune/"
-    "tienkung_take_box_26d_20fps_h50_full_10k/10000"
+    "/data/caobochun/openpi/checkpoints/pi05_tienkung_finetune/" "tienkung_take_box_26d_20fps_h50_full_10k/10000"
 )
 DEFAULT_EPISODE = Path("/data/caobochun/openpi/data/Tienkung_dual_hands_take_box_14/0013")
-DEFAULT_OUTPUT = Path(
-    "/data/caobochun/openpi/eval_outputs/tienkung_take_box_26d_20fps_h50_full_10k_holdout0013"
-)
+DEFAULT_OUTPUT = Path("/data/caobochun/openpi/eval_outputs/tienkung_take_box_26d_20fps_h50_full_10k_holdout0013")
 DEFAULT_PROMPT = "Pick up the black box on the table with both hands, hold it briefly, then put the box down."
 
 
@@ -39,7 +35,9 @@ def _make_state_or_action(arm: np.ndarray, left_hand: np.ndarray, right_hand: np
     return np.concatenate([arm[:7], left_hand[:6], arm[7:14], right_hand[:6]]).astype(np.float32)
 
 
-def _future_actions(arm_cmd: np.ndarray, left_cmd: np.ndarray, right_cmd: np.ndarray, start: int, horizon: int) -> np.ndarray:
+def _future_actions(
+    arm_cmd: np.ndarray, left_cmd: np.ndarray, right_cmd: np.ndarray, start: int, horizon: int
+) -> np.ndarray:
     """取未来 horizon 步真实命令；越界时用最后一帧补齐。"""
     actions = []
     last = len(arm_cmd) - 1
@@ -129,7 +127,7 @@ def main(
         result = policy.infer(obs, noise=noise)
         pred = np.asarray(result["actions"], dtype=np.float32)
 
-        arm_dims = [*range(0, 7), *range(13, 20)]
+        arm_dims = [*range(7), *range(13, 20)]
         hand_dims = [*range(7, 13), *range(20, 26)]
         abs_err = np.abs(pred[:, :26] - target)
         rows.append(

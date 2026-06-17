@@ -83,7 +83,7 @@ class AsyncPolicyProcess:
         """停止推理进程。"""
         self._stop_event.set()
         self._drop_stale_requests()
-        with contextlib_suppress_queue_full():
+        with SuppressQueueFull():
             self._request_queue.put_nowait(None)
         self._process.join(timeout=2.0)
         if self._process.is_alive():
@@ -124,7 +124,7 @@ class AsyncPolicyProcess:
                 break
 
 
-class contextlib_suppress_queue_full:
+class SuppressQueueFull:
     """忽略 multiprocessing queue full 的小型上下文。"""
 
     def __enter__(self):

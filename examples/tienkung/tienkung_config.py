@@ -9,7 +9,6 @@ from typing import Any
 
 import numpy as np
 
-
 STATE_DIM = 26
 MODEL_IMAGE_SIZE = 224
 
@@ -132,8 +131,7 @@ def build_robot_layout(args: Args) -> RobotLayout:
     state_joint_ids = [*left_arm_joint_ids, *left_hand_joint_ids, *right_arm_joint_ids, *right_hand_joint_ids]
     if len(state_joint_ids) != STATE_DIM:
         raise ValueError(
-            "电机 ID 数量必须为 26，顺序为左臂7 + 左手6 + 右臂7 + 右手6；"
-            f"当前数量为 {len(state_joint_ids)}。"
+            "电机 ID 数量必须为 26，顺序为左臂7 + 左手6 + 右臂7 + 右手6；" f"当前数量为 {len(state_joint_ids)}。"
         )
 
     arm_lower = parse_csv_floats(args.arm_lower_limits)

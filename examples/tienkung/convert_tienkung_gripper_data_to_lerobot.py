@@ -17,7 +17,6 @@ from PIL import Image
 import tqdm
 import tyro
 
-
 DEFAULT_RAW_DIR = Path("/data/caobochun/openpi/data/Tienkung_dual_hands_take_box_14")
 DEFAULT_REPO_ID = "caobochun/tienkung_dual_grippers_take_box_13_16d"
 DEFAULT_ROOT = Path("/data/caobochun/openpi/data/lerobot") / DEFAULT_REPO_ID

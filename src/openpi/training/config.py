@@ -564,8 +564,8 @@ class LeRobotTienkungGrippersDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
         )
-        
-        
+
+
 @dataclasses.dataclass(frozen=True)
 class TrainConfig:
     # Name of the config. Must be unique. Will be used to reference this config.
@@ -1069,11 +1069,9 @@ _CONFIGS = [
         exp_name="debug_pi05",
         wandb_enabled=False,
     ),
-    
     TrainConfig(
         name="pi05_tienkung_finetune",
         model=pi0_config.Pi0Config(pi05=True),
-
         data=LeRobotTienkungDataConfig(
             repo_id="caobochun/tienkung_dual_hands_take_box_13_26d",
             base_config=DataConfig(
@@ -1083,7 +1081,6 @@ _CONFIGS = [
             default_prompt="Pick up the black box on the table with both hands, hold it briefly, then put the box down.",
             extra_delta_transform=True,
         ),
-
         # 本地 pi05_base 是 PyTorch safetensors 格式，使用 train_pytorch.py 时从这里加载。
         weight_loader=weight_loaders.NoOpWeightLoader(),
         pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
@@ -1092,7 +1089,6 @@ _CONFIGS = [
     TrainConfig(
         name="pi05_tienkung_dual_grippers_finetune",
         model=pi0_config.Pi0Config(pi05=True),
-
         data=LeRobotTienkungGrippersDataConfig(
             repo_id="caobochun/tienkung_dual_grippers_take_box_13_16d",
             base_config=DataConfig(
@@ -1102,7 +1098,6 @@ _CONFIGS = [
             default_prompt="Pick up the black box on the table with both hands, hold it briefly, then put the box down.",
             extra_delta_transform=True,
         ),
-
         # 本地 pi05_base 是 PyTorch safetensors 格式，使用 train_pytorch.py 时从这里加载。
         weight_loader=weight_loaders.NoOpWeightLoader(),
         pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",

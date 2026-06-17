@@ -66,9 +66,16 @@ class Policy(BasePolicy):
 
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+        rtc_guidance = obs.get("rtc_guidance")
+        obs_without_guidance = dict(obs)
+        obs_without_guidance.pop("rtc_guidance", None)
+
         # Make a copy since transformations may modify the inputs in place.
-        inputs = jax.tree.map(lambda x: x, obs)
+        inputs = jax.tree.map(lambda x: x, obs_without_guidance)
         inputs = self._input_transform(inputs)
+
+        rtc_sample_kwargs = self._prepare_rtc_guidance(obs_without_guidance, rtc_guidance)
+
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
             inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
@@ -80,6 +87,7 @@ class Policy(BasePolicy):
 
         # Prepare kwargs for sample_actions
         sample_kwargs = dict(self._sample_kwargs)
+        sample_kwargs.update(rtc_sample_kwargs)
         if noise is not None:
             noise = torch.from_numpy(noise).to(self._pytorch_device) if self._is_pytorch_model else jnp.asarray(noise)
 
@@ -104,6 +112,43 @@ class Policy(BasePolicy):
             "infer_ms": model_time * 1000,
         }
         return outputs
+
+    def _prepare_rtc_guidance(self, obs: dict, rtc_guidance: dict | None) -> dict[str, Any]:
+        """把部署侧 RTC 目标动作转换到模型采样空间。"""
+        if rtc_guidance is None:
+            return {}
+        if not self._is_pytorch_model:
+            raise ValueError("当前 RTC guided inference 只实现了 PyTorch 模型路径。")
+
+        target_actions = np.asarray(rtc_guidance["target_actions"], dtype=np.float32)
+        weights = np.asarray(rtc_guidance["weights"], dtype=np.float32)
+        if target_actions.ndim != 2:
+            raise ValueError(f"rtc target_actions 必须是二维数组，当前 shape={target_actions.shape}")
+        if weights.ndim == 1:
+            weights = np.repeat(weights[:, None], target_actions.shape[-1], axis=-1)
+        if weights.shape != target_actions.shape:
+            raise ValueError(f"rtc weights shape {weights.shape} 必须等于 target_actions shape {target_actions.shape}")
+
+        guidance_obs = jax.tree.map(lambda x: x, obs)
+        guidance_obs["actions"] = target_actions
+        transformed = self._input_transform(guidance_obs)
+        model_targets = np.asarray(transformed["actions"], dtype=np.float32)
+
+        if weights.shape[-1] < model_targets.shape[-1]:
+            pad_width = [(0, 0)] * weights.ndim
+            pad_width[-1] = (0, model_targets.shape[-1] - weights.shape[-1])
+            weights = np.pad(weights, pad_width, constant_values=0.0)
+        else:
+            weights = weights[..., : model_targets.shape[-1]]
+
+        return {
+            "rtc_guidance": {
+                "target_actions": torch.from_numpy(model_targets[None, ...]).to(self._pytorch_device),
+                "weights": torch.from_numpy(weights[None, ...]).to(self._pytorch_device),
+                "beta": float(rtc_guidance.get("beta", 0.0)),
+                "eps": float(rtc_guidance.get("eps", 1e-4)),
+            }
+        }
 
     @property
     def metadata(self) -> dict[str, Any]:

@@ -20,6 +20,8 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.tienkung_dual_grippers_policy as tienkung_grippers_policy
+import openpi.policies.tienkung_dual_hands_policy as tienkung_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -65,6 +67,8 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
+    # 本地 LeRobot 数据集根目录；为空时使用 LeRobot 默认缓存目录。
+    lerobot_root: str | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -462,6 +466,106 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
         )
 
 
+@dataclasses.dataclass(frozen=True)
+class LeRobotTienkungDataConfig(DataConfigFactory):
+    """
+    配置天工双手 LeRobot 数据在训练和推理前后的字段映射与动作变换。
+    """
+
+    extra_delta_transform: bool = False
+    default_prompt: str | None = None
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/base_image": "base_image",
+                        "observation/left_image": "left_image",
+                        "observation/right_image": "right_image",
+                        "observation/state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[tienkung_policy.TienkungInputs(model_type=model_config.model_type)],
+            outputs=[tienkung_policy.TienkungOutputs()],
+        )
+
+        if self.extra_delta_transform:
+            # 状态/动作顺序约定为：左臂 7 维、左手 6 维、右臂 7 维、右手 6 维。
+            # pi0.5 使用增量关节动作，手部 6 维仍保持绝对值。
+            delta_action_mask = _transforms.make_bool_mask(7, -6, 7, -6)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotTienkungGrippersDataConfig(DataConfigFactory):
+    """
+    配置天工双夹爪 LeRobot 数据在训练和推理前后的字段映射与动作变换。
+    """
+
+    extra_delta_transform: bool = False
+    default_prompt: str | None = None
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/base_image": "base_image",
+                        "observation/left_image": "left_image",
+                        "observation/right_image": "right_image",
+                        "observation/state": "state",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[tienkung_grippers_policy.TienkungInputs(model_type=model_config.model_type)],
+            outputs=[tienkung_grippers_policy.TienkungOutputs()],
+        )
+
+        if self.extra_delta_transform:
+            # 状态/动作顺序约定为：左臂 7 维、左夹爪 1 维、右臂 7 维、右夹爪 1 维。
+            # pi0.5 使用增量关节动作，夹爪 1 维仍保持绝对值。
+            delta_action_mask = _transforms.make_bool_mask(7, -1, 7, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+        
+        
 @dataclasses.dataclass(frozen=True)
 class TrainConfig:
     # Name of the config. Must be unique. Will be used to reference this config.
@@ -964,6 +1068,45 @@ _CONFIGS = [
         overwrite=True,
         exp_name="debug_pi05",
         wandb_enabled=False,
+    ),
+    
+    TrainConfig(
+        name="pi05_tienkung_finetune",
+        model=pi0_config.Pi0Config(pi05=True),
+
+        data=LeRobotTienkungDataConfig(
+            repo_id="caobochun/tienkung_dual_hands_take_box_13_26d",
+            base_config=DataConfig(
+                lerobot_root="/data/caobochun/openpi/data/lerobot/caobochun/tienkung_dual_hands_take_box_13_26d",
+                prompt_from_task=True,
+            ),
+            default_prompt="Pick up the black box on the table with both hands, hold it briefly, then put the box down.",
+            extra_delta_transform=True,
+        ),
+
+        # 本地 pi05_base 是 PyTorch safetensors 格式，使用 train_pytorch.py 时从这里加载。
+        weight_loader=weight_loaders.NoOpWeightLoader(),
+        pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
+        num_train_steps=10_000,
+    ),
+    TrainConfig(
+        name="pi05_tienkung_dual_grippers_finetune",
+        model=pi0_config.Pi0Config(pi05=True),
+
+        data=LeRobotTienkungGrippersDataConfig(
+            repo_id="caobochun/tienkung_dual_grippers_take_box_13_16d",
+            base_config=DataConfig(
+                lerobot_root="/data/caobochun/openpi/data/lerobot/caobochun/tienkung_dual_grippers_take_box_13_16d",
+                prompt_from_task=True,
+            ),
+            default_prompt="Pick up the black box on the table with both hands, hold it briefly, then put the box down.",
+            extra_delta_transform=True,
+        ),
+
+        # 本地 pi05_base 是 PyTorch safetensors 格式，使用 train_pytorch.py 时从这里加载。
+        weight_loader=weight_loaders.NoOpWeightLoader(),
+        pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
+        num_train_steps=10_000,
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),

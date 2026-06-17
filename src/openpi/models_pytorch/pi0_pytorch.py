@@ -373,9 +373,16 @@ class PI0Pytorch(nn.Module):
 
         return F.mse_loss(u_t, v_t, reduction="none")
 
-    @torch.no_grad()
-    def sample_actions(self, device, observation, noise=None, num_steps=10) -> Tensor:
+    def sample_actions(self, device, observation, noise=None, num_steps=10, rtc_guidance=None) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
+        if rtc_guidance is None:
+            with torch.no_grad():
+                return self._sample_actions_impl(device, observation, noise=noise, num_steps=num_steps)
+        with torch.enable_grad():
+            return self._sample_actions_impl(device, observation, noise=noise, num_steps=num_steps, rtc_guidance=rtc_guidance)
+
+    def _sample_actions_impl(self, device, observation, noise=None, num_steps=10, rtc_guidance=None) -> Tensor:
+        """执行 flow matching 采样，可选加入 RTC guided velocity correction。"""
         bsize = observation.state.shape[0]
         if noise is None:
             actions_shape = (bsize, self.config.action_horizon, self.config.action_dim)
@@ -405,6 +412,8 @@ class PI0Pytorch(nn.Module):
         x_t = noise
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
         while time >= -dt / 2:
+            if rtc_guidance is not None:
+                x_t = x_t.detach().requires_grad_(True)
             expanded_time = time.expand(bsize)
             v_t = self.denoise_step(
                 state,
@@ -413,11 +422,39 @@ class PI0Pytorch(nn.Module):
                 x_t,
                 expanded_time,
             )
+            if rtc_guidance is not None:
+                v_t = v_t + self._rtc_guidance_correction(x_t, v_t, time, rtc_guidance)
 
             # Euler step - use new tensor assignment instead of in-place operation
             x_t = x_t + dt * v_t
+            if rtc_guidance is not None:
+                x_t = x_t.detach()
             time += dt
         return x_t
+
+    def _rtc_guidance_correction(self, x_t, v_t, time, rtc_guidance):
+        """计算 Real-Time Chunking 的 ΠGDM 速度修正量。"""
+        target_actions = rtc_guidance["target_actions"].to(device=x_t.device, dtype=x_t.dtype)
+        weights = rtc_guidance["weights"].to(device=x_t.device, dtype=x_t.dtype)
+        beta = torch.as_tensor(rtc_guidance.get("beta", 0.0), dtype=x_t.dtype, device=x_t.device)
+        eps = torch.as_tensor(rtc_guidance.get("eps", 1e-4), dtype=x_t.dtype, device=x_t.device)
+        if float(beta.detach().cpu()) <= 0.0:
+            return torch.zeros_like(v_t)
+
+        tau = torch.clamp(time.to(dtype=x_t.dtype, device=x_t.device), min=eps, max=1.0 - eps)
+        a_hat_1 = x_t + (1.0 - tau) * v_t
+        weighted_error = (target_actions - a_hat_1) * weights
+
+        # VJP: weighted_error @ d(a_hat_1) / d(x_t)
+        objective = (a_hat_1 * weighted_error.detach()).sum()
+        grad = torch.autograd.grad(objective, x_t, retain_graph=False, create_graph=False, allow_unused=True)[0]
+        if grad is None:
+            return torch.zeros_like(v_t)
+
+        one_minus_tau = 1.0 - tau
+        r_tau_sq = (one_minus_tau * one_minus_tau) / (tau * tau + one_minus_tau * one_minus_tau + eps)
+        guidance_scale = torch.minimum(beta, (one_minus_tau / tau) * r_tau_sq)
+        return guidance_scale * grad
 
     def denoise_step(
         self,

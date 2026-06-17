@@ -4,7 +4,7 @@
 
 This is an unofficial OpenPI-based project for reproducing, integrating, and extending a more complete OpenPI-style VLA engineering stack for humanoid robots.
 
-The project credits and builds on Physical Intelligence's [`openpi`](https://github.com/Physical-Intelligence/openpi). The goal is not to present an official PI implementation, but to build a personal non-official version that experiments with capabilities such as:
+The project credits and builds on Physical Intelligence's [`openpi`](https://github.com/Physical-Intelligence/openpi). It is an independent personal version that experiments with capabilities such as:
 
 - pi0.5-style higher-level semantics.
 - RTC / real-time action chunking.

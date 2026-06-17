@@ -6,7 +6,7 @@
 
 The project is built on top of Physical Intelligence's open-source [`openpi`](https://github.com/Physical-Intelligence/openpi) repository. I am grateful to the Physical Intelligence team for releasing the OpenPI codebase, model definitions, training and inference examples, remote policy-server workflow, and public `pi0`, `pi0-FAST`, and `pi0.5` assets. This repository would not be possible without that foundation.
 
-This repository is not affiliated with or endorsed by Physical Intelligence. Its purpose is to reproduce, integrate, and extend the missing OpenPI-style engineering pieces that have been discussed in public materials but have not yet been released as a complete official OpenPI implementation.
+This is an independent project built with deep respect for the upstream OpenPI work. Its purpose is to reproduce, integrate, and extend OpenPI-style engineering pieces that have been discussed in public materials but have not yet been released as a complete OpenPI implementation.
 
 The original upstream OpenPI README is preserved here:
 

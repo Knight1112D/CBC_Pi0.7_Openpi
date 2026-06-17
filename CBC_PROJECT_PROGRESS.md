@@ -2,9 +2,9 @@
 
 ## Goal
 
-This is an unofficial OpenPI-based project for learning, reproducing, and extending open-source VLA deployment on humanoid robots.
+This is an unofficial OpenPI-based project for reproducing, integrating, and extending a more complete OpenPI-style VLA engineering stack for humanoid robots.
 
-The project credits and builds on Physical Intelligence's [`openpi`](https://github.com/Physical-Intelligence/openpi). The goal is not to present an official PI implementation, but to explore a community-readable path toward capabilities such as:
+The project credits and builds on Physical Intelligence's [`openpi`](https://github.com/Physical-Intelligence/openpi). The goal is not to present an official PI implementation, but to build a personal non-official version that experiments with capabilities such as:
 
 - pi0.5-style higher-level semantics.
 - RTC / real-time action chunking.
@@ -20,15 +20,15 @@ The project credits and builds on Physical Intelligence's [`openpi`](https://git
 
 ## Todo List
 
-- [ ] Add generic humanoid robot adapter documentation.
-- [ ] Add code-only setup and smoke-test instructions.
-- [ ] Add safe dry-run and replay-mode policy-client examples.
+- [ ] Implement a humanoid observation/action interface in the OpenPI transform stack.
+- [ ] Add code-only smoke tests for new model, data, and policy-server paths.
+- [ ] Add dry-run and replay-mode policy clients for validation.
 - [ ] Implement RTC offline replay and delay sweep.
 - [ ] Design RECAP metadata and sidecar label format.
 - [ ] Add RECAP debug config and 1-2 step smoke test.
 - [ ] Design optional MEM/context input fields.
 - [ ] Summarize pi0.7 public concepts and mark project assumptions clearly.
-- [ ] Keep all platform-specific deployment notes separate from the generic OpenPI extension path.
+- [ ] Keep platform-specific robot bridges separate from the core OpenPI reproduction work.
 
 ## Related Project
 

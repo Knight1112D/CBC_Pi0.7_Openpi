@@ -83,11 +83,27 @@ That repository is a data-collection reference. This repository is focused on bu
 
 ### 4. RTC / Real-Time Chunking
 
-- [ ] Implement offline delay simulation and replay evaluation.
-- [ ] Compare async baseline, fixed-horizon RTC, delay-adaptive RTC, and suffix soft blending.
-- [ ] Validate model-side RTC guidance in the flow-matching sampling loop.
-- [ ] Explore training-time delay conditioning.
-- [ ] Report metrics such as latency, replan frequency, action smoothness, and rollout stability.
+RTC 是当前项目优先推进的远程推理稳定性方向。人形机器人异步部署实验通常采用 policy server：控制循环保持固定频率发布动作，模型在后台生成下一段 action chunk。推理期间已经执行或即将执行的旧 chunk 前缀会成为新 chunk 的 hard prefix，因此 RTC 的关键目标是让新 chunk 在延迟存在时仍能和已承诺动作连续衔接。
+
+当前路线已经从早期 inference-time VJP/Jacobian guidance 调整为 training-time RTC：训练时随机模拟推理延迟，把 prefix token 作为无噪动作条件输入；部署时只传 `rtc_prefix`，采样循环每个 denoise step 都 hard overwrite prefix，不再在推理期做额外反传修正。详细设计见 [`docs/cbc/training_time_rtc.md`](docs/cbc/training_time_rtc.md)。
+
+已完成：
+
+- [x] 新增 `RTCTrainingConfig`，并接入 `pi05_tienkung_finetune_rtc`。
+- [x] 在 PyTorch pi0.5 flow-matching 训练中加入 training-time delay sampling：prefix 使用 clean action，postfix 继续加噪并只对有效 postfix 计算 loss。
+- [x] 在 `PI0Pytorch.sample_actions()` 中支持 `rtc_prefix` hard-prefix 采样，prefix token 使用当前 OpenPI flow 公式下的 clean endpoint。
+- [x] 更新 policy 接口和异步客户端示例，部署侧按 observed delay 跳过已执行 prefix，只执行新 chunk 的 postfix。
+- [x] 增加 `examples/tienkung/rtc_chunker_test.py` 和 `examples/tienkung/simulate_rtc_replay.py`，用于 chunk suffix 融合和 hard-prefix replay smoke。
+- [x] 完成真实 batch forward/backward、hard-prefix `sample_actions`、2 step training smoke、示例编译和 replay smoke。
+
+后续实验：
+
+- [ ] 实现系统化 offline delay simulation 和 replay evaluation。
+- [ ] 对比 async baseline、fixed-horizon RTC、delay-adaptive RTC、suffix soft blending 和 training-time RTC hard-prefix。
+- [ ] 补充 delay 分布配置：`uniform`、`exp`、`empirical`。
+- [ ] 用真实推理延迟日志生成 empirical delay histogram，并做 `d=0..25, s=25` 的离线 delay sweep。
+- [ ] 记录并汇报 latency、replan frequency、action smoothness、prefix/postfix discontinuity、rollout stability 等指标。
+- [ ] 如果后续重新验证 model-side inference-time guidance，需要作为实验性开关和 training-time RTC 对照项，而不是默认部署路径。
 
 ### 5. pi0.6-Style RECAP / RL
 

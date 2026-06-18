@@ -49,12 +49,6 @@ class Args:
     rtc_min_horizon: int = 8
     rtc_delay_buffer_size: int = 8
     rtc_initial_delay_steps: int = 8
-    rtc_blend_steps: int = 6
-    rtc_soft_preserve_weight: float = 0.85
-    rtc_model_guidance_enabled: bool = False
-    rtc_guidance_beta: float = 1.0
-    rtc_guidance_decay: float = 0.9
-    rtc_guidance_eps: float = 1e-4
     command_speed: float = 5.0
     command_current: float = 20.0
 

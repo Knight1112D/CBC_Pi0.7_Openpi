@@ -85,10 +85,12 @@ class GemmaRMSNorm(nn.Module):
             raise ValueError(f"Expected cond dimension {self.cond_dim}, got {cond.shape[-1]}")
         
         #self.dense.to(dtype=torch.bfloat16).to(dtype=torch.float32)
-        modulation = self.dense(cond)
-        # Reshape modulation to broadcast properly: [batch, 1, features] for [batch, seq, features]
-        if len(x.shape) == 3:  # [batch, seq, features]
-            modulation = modulation.unsqueeze(1)
+        if cond.ndim == 2:
+            modulation = self.dense(cond)[:, None, :]
+        elif cond.ndim == 3:
+            modulation = self.dense(cond)
+        else:
+            raise ValueError(f"Expected cond rank 2 or 3, got shape {cond.shape}")
         
         scale, shift, gate = torch.chunk(modulation, 3, dim=-1)
         

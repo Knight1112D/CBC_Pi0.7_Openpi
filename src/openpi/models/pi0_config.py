@@ -16,6 +16,27 @@ if TYPE_CHECKING:
 
 
 @dataclasses.dataclass(frozen=True)
+class RTCTrainingConfig:
+    """训练时 RTC 动作前缀条件化配置。"""
+
+    enabled: bool = False
+    min_prefix_steps: int = 0
+    max_prefix_steps: int | None = None
+    execution_horizon: int | None = None
+    prefix_probability: float = 1.0
+
+    def __post_init__(self):
+        if self.min_prefix_steps < 0:
+            raise ValueError("min_prefix_steps must be non-negative.")
+        if self.max_prefix_steps is not None and self.max_prefix_steps < self.min_prefix_steps:
+            raise ValueError("max_prefix_steps must be greater than or equal to min_prefix_steps.")
+        if self.execution_horizon is not None and self.execution_horizon <= 0:
+            raise ValueError("execution_horizon must be positive when set.")
+        if not 0.0 <= self.prefix_probability <= 1.0:
+            raise ValueError("prefix_probability must be in [0, 1].")
+
+
+@dataclasses.dataclass(frozen=True)
 class Pi0Config(_model.BaseModelConfig):
     dtype: str = "bfloat16"
     paligemma_variant: _gemma.Variant = "gemma_2b"
@@ -33,6 +54,7 @@ class Pi0Config(_model.BaseModelConfig):
     discrete_state_input: bool = None  # type: ignore
 
     pytorch_compile_mode: str | None = "max-autotune"
+    rtc_training: RTCTrainingConfig = dataclasses.field(default_factory=RTCTrainingConfig)
 
     def __post_init__(self):
         if self.max_token_len is None:

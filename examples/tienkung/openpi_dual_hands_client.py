@@ -39,7 +39,6 @@ class TienkungDualHandsController(Node):
 
         self.execution_queue: deque[np.ndarray] = deque()
         self.last_action: np.ndarray | None = None
-        self.last_model_chunk: np.ndarray | None = None
         self.inference_idx = 0
         self.last_request_time = 0.0
 
@@ -126,7 +125,7 @@ class TienkungDualHandsController(Node):
 
 
 class TienkungDualHandsRtcController(Node):
-    """RTC 调度版本：控制循环 + 独立推理进程 + chunk suffix 软融合。"""
+    """Training-time RTC 调度版本：控制循环 + 独立推理进程 + hard-prefix 条件化。"""
 
     def __init__(self, args: Args) -> None:
         super().__init__("tienkung_dual_hands_openpi_rtc_client")
@@ -136,12 +135,10 @@ class TienkungDualHandsRtcController(Node):
         self.policy = AsyncPolicyProcess(remote_host=args.remote_host, remote_port=args.remote_port)
         self.policy.start()
         self.rtc = RtcChunker(
-            horizon=args.open_loop_horizon,
+            horizon=args.max_action_chunk_len,
             min_horizon=args.rtc_min_horizon,
             delay_buffer_size=args.rtc_delay_buffer_size,
             initial_delay_steps=args.rtc_initial_delay_steps,
-            blend_steps=args.rtc_blend_steps,
-            preserve_weight=args.rtc_soft_preserve_weight,
         )
 
         self.log_dir = Path(args.log_dir)
@@ -154,8 +151,9 @@ class TienkungDualHandsRtcController(Node):
         self.get_logger().info(f"状态电机顺序: {self.layout.state_joint_ids}")
         self.get_logger().info(f"图像消息类型: {COMPRESSED_IMAGE_MSG.__name__}")
         self.get_logger().info(
-            "RTC 调度模式：控制循环不等待推理，使用延迟估计、动态 horizon、上一 chunk suffix 软融合。"
-            f"模型侧速度修正={'开启' if args.rtc_model_guidance_enabled else '关闭'}。"
+            "Training-time RTC 调度模式：控制循环不等待推理，使用延迟估计和上一 chunk hard-prefix。"
+            f"执行计划长度={args.max_action_chunk_len}，最小重规划间隔={args.rtc_min_horizon}，"
+            "模型侧使用 rtc_prefix 条件化采样。"
         )
 
     def destroy_node(self) -> bool:
@@ -174,7 +172,7 @@ class TienkungDualHandsRtcController(Node):
         self.rtc.record_control_step()
 
     def _poll_policy_result(self) -> None:
-        """接收推理结果，插值后交给 RTC chunker 融合。"""
+        """接收推理结果，插值后交给 RTC chunker 对齐 prefix。"""
         result = self.policy.poll_latest()
         if result is None:
             return
@@ -193,9 +191,6 @@ class TienkungDualHandsRtcController(Node):
             upper_limits=self.layout.upper_limits,
         )
         merged_plan, observed_delay = self.rtc.accept_new_chunk(result["request_id"], plan)
-        self.last_model_chunk = np.asarray(result["actions"], dtype=np.float32)[
-            : self.args.max_action_chunk_len, :STATE_DIM
-        ]
         if self.args.save_action_chunks:
             np.savez_compressed(
                 self.log_dir / f"rtc_action_chunk_{self.inference_idx:06d}.npz",
@@ -217,14 +212,19 @@ class TienkungDualHandsRtcController(Node):
         if self.policy.inflight or not self.rtc.should_request():
             return
         observation = self.ros_io.build_observation(self.args.prompt)
-        guidance = self._build_model_guidance()
-        if guidance is not None:
-            observation["rtc_guidance"] = guidance
+        prefix = self.rtc.make_action_prefix()
+        if prefix is not None:
+            action_prefix, delay = prefix
+            observation["rtc_prefix"] = {
+                "action_prefix": action_prefix,
+                "delay": delay,
+            }
         request_id = self.policy.submit_latest(observation)
         context = self.rtc.make_request_context(request_id)
         self.get_logger().info(
             f"RTC 提交推理请求 #{request_id}: s={context.executed_since_swap}, "
-            f"d_est={context.delay_estimate_steps}, suffix={context.previous_suffix.shape}",
+            f"d_est={context.delay_estimate_steps}, "
+            f"prefix_steps={0 if prefix is None else prefix[1]}, suffix={context.previous_suffix.shape}",
             throttle_duration_sec=1.0,
         )
 
@@ -234,55 +234,6 @@ class TienkungDualHandsRtcController(Node):
         action = self.rtc.consume_action(fallback)
         self.last_action = action
         self.ros_io.publish_action(action)
-
-    def _build_model_guidance(self) -> dict | None:
-        """构造传给模型采样循环的 RTC guidance。"""
-        if not self.args.rtc_model_guidance_enabled or self.last_model_chunk is None:
-            return None
-
-        executed_model_steps = int(
-            round(self.rtc.executed_since_swap / self.args.control_hz * self.args.policy_action_hz)
-        )
-        suffix = self.last_model_chunk[min(executed_model_steps, len(self.last_model_chunk)) :]
-        if len(suffix) == 0:
-            return None
-
-        target = np.zeros((self.args.max_action_chunk_len, STATE_DIM), dtype=np.float32)
-        copy_len = min(len(suffix), len(target))
-        target[:copy_len] = suffix[:copy_len]
-
-        delay_estimate = max(self.rtc.delay_steps) if self.rtc.delay_steps else self.args.rtc_initial_delay_steps
-        weights_1d = self._make_soft_mask(
-            horizon=self.args.max_action_chunk_len,
-            delay_steps=min(delay_estimate, self.args.max_action_chunk_len),
-            executed_steps=min(executed_model_steps, self.args.max_action_chunk_len),
-            decay=self.args.rtc_guidance_decay,
-        )
-        weights = np.repeat(weights_1d[:, None], STATE_DIM, axis=1).astype(np.float32)
-        return {
-            "target_actions": target,
-            "weights": weights,
-            "beta": float(self.args.rtc_guidance_beta),
-            "eps": float(self.args.rtc_guidance_eps),
-        }
-
-    @staticmethod
-    def _make_soft_mask(*, horizon: int, delay_steps: int, executed_steps: int, decay: float) -> np.ndarray:
-        """按 RTC soft masking 思路生成 0~1 权重。"""
-        weights = np.zeros((horizon,), dtype=np.float32)
-        overlap_end = max(0, horizon - executed_steps)
-        if overlap_end == 0:
-            return weights
-        hard_end = min(delay_steps, overlap_end)
-        weights[:hard_end] = 1.0
-        if hard_end >= overlap_end:
-            return weights
-        denom = max(1, overlap_end - hard_end)
-        for idx in range(hard_end, overlap_end):
-            ci = (overlap_end - idx) / (denom + 1)
-            exp_part = (np.exp(ci) - 1.0) / (np.e - 1.0)
-            weights[idx] = float((decay ** (idx - hard_end + 1)) * exp_part)
-        return weights
 
 
 def main(args: Args) -> None:

@@ -400,6 +400,7 @@ def train_loop(config: _config.TrainConfig):
             paligemma_variant=getattr(config.model, "paligemma_variant", "gemma_2b"),
             action_expert_variant=getattr(config.model, "action_expert_variant", "gemma_300m"),
             pi05=getattr(config.model, "pi05", False),
+            rtc_training=getattr(config.model, "rtc_training", openpi.models.pi0_config.RTCTrainingConfig()),
         )
     else:
         model_cfg = config.model

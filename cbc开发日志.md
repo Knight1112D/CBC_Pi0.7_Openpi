@@ -524,3 +524,287 @@ interpolation
 - 部署侧源码默认值同步为 `control_hz=20`、`policy_action_hz=20`，状态/动作布局同步为 26 维。
 
 这些参数决定 50 步 action chunk 在真机上被如何插值、截断和重规划，不能只按训练 fps 解释。
+
+### 10. 2026-06-17 RTC 第一步：离线调度闭环（历史推理期尝试，已被 training-time RTC 替换）
+
+> 说明：本节记录的是 2026-06-17 做过的 inference-time RTC / suffix soft blend / `rtc_guidance` 尝试。2026-06-18 之后项目主线已经改为 training-time RTC hard-prefix，部署侧统一传 `rtc_prefix`，不再使用本节里的 `rtc_guidance`、soft mask 和 suffix soft blend 作为主路径。保留本节是为了说明探索过程和为什么后续改方向。
+
+- 已在服务器 `/data/caobochun` 使用 `proxychains4` 克隆官方 RTC 仓库：
+
+```text
+/data/caobochun/real-time-chunking-kinetix
+commit 9296f31d62d5bfeb5779dcb2f9bcf71ca37f448b
+```
+
+该仓库是 Physical Intelligence 官方 Kinetix 仿真实验代码，不是 openpi 直接补丁；当前只借鉴异步执行、inference delay、execute horizon、prefix/suffix guidance 的算法结构。
+
+- 已修正天工 RTC 部署侧调度：
+
+```text
+/data/caobochun/openpi/examples/tienkung/rtc_chunker.py
+/data/caobochun/openpi/examples/tienkung/openpi_dual_hands_client.py
+```
+
+关键变化：`RtcChunker` 增加参数边界检查、基于剩余步数和延迟估计触发请求、忽略过期响应、返回动作 copy；RTC 控制器使用 `max_action_chunk_len` 作为可保留执行计划长度，用 `rtc_min_horizon` 控制最小重规划间隔，避免默认 `open_loop_horizon=8` 时没有旧 suffix 可融合。
+
+- 已补充离线 smoke/replay 和单元测试：
+
+```text
+/data/caobochun/openpi/examples/tienkung/simulate_rtc_replay.py
+/data/caobochun/openpi/examples/tienkung/rtc_chunker_test.py
+```
+
+验证命令：
+
+```bash
+cd /data/caobochun/openpi
+. .venv/bin/activate
+python -m py_compile examples/tienkung/rtc_chunker.py examples/tienkung/openpi_dual_hands_client.py examples/tienkung/simulate_rtc_replay.py src/openpi/policies/policy.py src/openpi/models_pytorch/pi0_pytorch.py
+UV_LINK_MODE=copy uv run pytest examples/tienkung/rtc_chunker_test.py -q
+UV_LINK_MODE=copy uv run python examples/tienkung/simulate_rtc_replay.py --num-chunks 6 --fixed-delay-steps 4 --output /data/caobochun/openpi/eval_outputs/rtc_replay_smoke.npz
+```
+
+结果：
+
+```text
+2 passed in 0.07s
+rtc_replay_smoke.npz
+num_actions=72
+mean_delay_steps=4
+max_delay_steps=4
+mean_abs_delta=0.046723
+max_abs_delta=0.151428
+mean_abs_ddelta=0.015288
+max_abs_ddelta=0.151428
+```
+
+- 已修正 policy server 的 RTC guidance shape：部署侧可传 26 维、32 步 guidance，`Policy._prepare_rtc_guidance()` 会经过输入 transform 后自动补齐/截断到模型 `action_horizon/action_dim`，避免开启 `rtc_model_guidance_enabled` 时和 pi0.5 默认 50x32 输出不匹配。
+
+- 本次没有启动 ROS 客户端，没有连接真机，也没有发布机器人动作。下一步建议用已保存的真实 `rtc_action_chunk_*.npz` 或 holdout 评估输出跑 replay delay sweep，对比 async、固定 horizon RTC、delay-adaptive RTC、suffix soft blend 的平滑度和重规划频率。
+
+### 11. 2026-06-18 RTC 方向修正：统一改为 training-time RTC hard-prefix
+
+#### 为什么从 inference-time RTC 改到 training-time RTC
+
+前一版 RTC 尝试里做过部署侧 suffix 软融合和模型侧 `rtc_guidance`。这条路线属于推理期 RTC：每次 denoising step 都要根据旧 chunk 的目标 prefix/postfix 计算修正项，核心会涉及 VJP/Jacobian 相关反传。对 pi0.5 这种大模型来说，这会明显增加 policy server 推理时间。
+
+后续如果模型更大、图像更多、denoise step 更多，或者从 4090 换到 AGX 这类端侧设备，推理延迟 `d` 会继续变大。推理期 RTC 的 VJP/Jacobian 开销和延迟增长会互相放大：延迟越大，需要约束的 prefix 越长；prefix 越长，推理期修正越重。论文 `Training-Time Action Conditioning for Efficient Real-Time Chunking` 和 PI/Kinetix 参考项目都说明：在较大 delay 下，training-time RTC 通常比 inference-time RTC 更稳，而且部署时没有额外 VJP 开销。
+
+因此本项目后续统一采用 training-time RTC：
+
+```text
+训练时：随机模拟推理延迟 d，把动作前 d 步作为无噪 action prefix 输入模型，只对 postfix 计算 flow matching loss。
+推理时：把旧 chunk 中推理期间会继续执行的动作作为 rtc_prefix 传给模型，模型 hard-prefix denoise，返回后跳过已经执行过的 prefix，只执行 postfix。
+```
+
+旧的 `rtc_guidance`、soft mask、suffix soft blend 只作为历史尝试，不再作为主线。
+
+#### H、s、d 和 25 的来源
+
+当前 pi0.5 默认动作预测长度：
+
+```text
+H = action_horizon = 50
+```
+
+部署控制频率按 20Hz 计算：
+
+```text
+1 个控制步 = 1 / 20s = 50ms
+```
+
+当前 4090 上一次 policy 推理约 `73ms`：
+
+```text
+73ms / 50ms = 1.46 个控制步
+```
+
+因此 4090 上真实推理延迟按控制步计大约是 2 步以内，远小于 25。之前口头估算里出现过“约 15 个动作”的说法，容易和 denoise 内部计算/动作点数混在一起；训练 RTC 的 `d` 应按部署控制步换算。
+
+AGX 上如果一次推理约 `1.2s`：
+
+```text
+1.2s / 50ms = 24 个控制步
+```
+
+RTC 合法条件是：
+
+```text
+d <= H - s
+```
+
+为了让训练覆盖 AGX 约 24 步延迟，同时保持一半 chunk 用于执行新 postfix，当前取：
+
+```text
+H = 50
+s = 25
+max d = 25
+```
+
+于是：
+
+```text
+H - s = 25
+d ∈ [0, 25]
+```
+
+这既覆盖 4090 的小延迟，也覆盖 AGX 的约 24 步大延迟，并给后续推理开销继续变大的情况留出训练覆盖范围。
+
+#### 当前训练实现
+
+实现位置：
+
+```text
+/data/caobochun/openpi/src/openpi/models/pi0_config.py
+/data/caobochun/openpi/src/openpi/models_pytorch/pi0_pytorch.py
+/data/caobochun/openpi/src/openpi/models_pytorch/transformers_replace/models/gemma/modeling_gemma.py
+/data/caobochun/openpi/src/openpi/training/config.py
+/data/caobochun/openpi/scripts/train_pytorch.py
+```
+
+新增 `RTCTrainingConfig`，当前天工 RTC 配置：
+
+```text
+enabled=True
+min_prefix_steps=0
+max_prefix_steps=25
+execution_horizon=25
+prefix_probability=1.0
+```
+
+训练 forward 的核心逻辑：
+
+```text
+1. 每个 batch 样本随机采样 prefix_steps=d。
+2. prefix_mask = arange(H) < d。
+3. OpenPI flow 约定是 time=0 为清晰动作，time=1 为噪声。
+4. prefix token 的 model_time 设为 0.0，x_t 直接等于真实动作。
+5. postfix token 使用普通 sampled time，x_t = time * noise + (1 - time) * action。
+6. pi0.5 action expert 的 adaRMS 条件改成支持 per-token timestep，即 [B, H, E]。
+7. loss 只在 postfix 上计算，并按有效 postfix 步数归一化。
+```
+
+注意：论文伪代码使用的是相反 flow 记号，`time=1` 是清晰动作端；OpenPI 当前 PyTorch 实现里 `time=0` 是清晰动作端，所以代码中 prefix timestep 使用 `0.0` 是等价实现，不是反了。
+
+训练配置：
+
+```text
+debug_pi05_rtc
+pi05_tienkung_finetune_rtc
+pi05_tienkung_dual_grippers_finetune_rtc
+```
+
+建议主训练命令：
+
+```bash
+cd /data/caobochun/openpi
+. .venv/bin/activate
+CUDA_VISIBLE_DEVICES=<gpu_id> python scripts/train_pytorch.py pi05_tienkung_finetune_rtc \
+  --exp_name <实验名> \
+  --overwrite \
+  --batch-size <batch_size> \
+  --num-workers <num_workers>
+```
+
+如果服务器没有 wandb key，可加：
+
+```bash
+WANDB_MODE=offline
+```
+
+#### 当前推理/部署实现
+
+training-time RTC 部署侧只走 `rtc_prefix`，不再走 `rtc_guidance`：
+
+```text
+/data/caobochun/openpi/src/openpi/policies/policy.py
+/data/caobochun/openpi/src/openpi/models_pytorch/pi0_pytorch.py
+/data/caobochun/openpi/examples/tienkung/rtc_chunker.py
+/data/caobochun/openpi/examples/tienkung/openpi_dual_hands_client.py
+```
+
+部署流程：
+
+```text
+1. RtcChunker 根据当前 chunk 剩余动作和延迟 buffer 估计 d。
+2. 请求下一次推理前，把旧 chunk 剩余动作补齐成 action_prefix，并只声明前 d 步有效。
+3. observation 中加入：
+   rtc_prefix = {
+       "action_prefix": action_prefix,
+       "delay": d,
+   }
+4. Policy._prepare_rtc_prefix() 让 prefix action 经过同一套 action transform，转换到模型采样空间。
+5. PI0Pytorch.sample_actions() 每个 denoise step 都 hard overwrite prefix token，并给 prefix token 使用 clean endpoint timestep。
+6. 新 chunk 返回后，部署侧按真实 observed_delay 跳过已经执行过的 prefix，只执行 postfix。
+```
+
+已经从 `examples/tienkung` 删除旧推理期 RTC 配置和接口：
+
+```text
+rtc_model_guidance_enabled
+rtc_guidance_beta
+rtc_guidance_decay
+rtc_guidance_eps
+rtc_blend_steps
+rtc_soft_preserve_weight
+rtc_guidance
+soft mask
+suffix soft blend
+```
+
+#### 已完成验证
+
+已完成的最小验证：
+
+```text
+1. PyTorch 真实 batch forward/backward：loss finite。
+2. hard-prefix inference sample：sample_shape=(1, 50, 32)，sample_finite=True。
+3. train_pytorch 2 step smoke：pi05_tienkung_finetune_rtc 可正常训练和保存 checkpoint。
+4. examples/tienkung 编译通过。
+5. examples/tienkung/rtc_chunker_test.py：2 passed。
+6. examples/tienkung/simulate_rtc_replay.py hard-prefix smoke 通过。
+```
+
+本次没有启动 ROS 客户端，没有连接真机，也没有发布机器人动作。
+
+#### 后续改进点
+
+1. 增加 delay 分布配置：
+
+```text
+uniform      # 当前 [0, 25] 均匀采样
+exp          # 借鉴 Kinetix，偏向小 delay，但仍覆盖大 delay
+empirical    # 用真机/AGX 实测延迟直方图采样
+```
+
+2. 做离线 delay sweep：
+
+```text
+d = 0..25
+s = 25
+num_steps = 10
+```
+
+对比普通 async、training-time RTC hard-prefix、历史 inference-time guidance 的动作连续性、重规划频率和任务成功率。
+
+3. 训练策略建议从普通 BC checkpoint 继续 fine-tune RTC，而不是训练一个新的输出头。Kinetix 官方复现也是从普通 flow policy checkpoint 加 simulated delay 继续训练。
+
+4. 如果以后使用 JAX `scripts/train.py`，需要把 PyTorch 这套 training-time RTC 同步到 JAX `src/openpi/models/pi0.py`。当前完整实现和验证只覆盖 PyTorch pi0.5 / `scripts/train_pytorch.py` 路径。
+
+5. 当前 `.venv` 中 transformers 的 Gemma replacement 已 patch 支持 per-token adaRMS；如果重建虚拟环境，需要重新复制：
+
+```bash
+cp -r ./src/openpi/models_pytorch/transformers_replace/* .venv/lib/python3.11/site-packages/transformers/
+```
+
+6. 真机部署前检查：
+
+```text
+policy server 是否加载 RTC finetune checkpoint
+client 是否使用 controller_mode="rtc"
+control_hz=20
+policy_action_hz=20
+max_action_chunk_len 是否和模型输出/部署截断一致
+rtc_min_horizon / rtc_initial_delay_steps 是否符合当前设备实测延迟
+急停、限幅、动作维度、三路图像话题是否正确
+```

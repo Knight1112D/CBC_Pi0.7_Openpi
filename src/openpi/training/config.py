@@ -1070,6 +1070,26 @@ _CONFIGS = [
         wandb_enabled=False,
     ),
     TrainConfig(
+        name="debug_pi05_rtc",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="dummy",
+            action_expert_variant="dummy",
+            rtc_training=pi0_config.RTCTrainingConfig(
+                enabled=True,
+                min_prefix_steps=0,
+                max_prefix_steps=25,
+                execution_horizon=25,
+            ),
+        ),
+        data=FakeDataConfig(),
+        batch_size=2,
+        num_train_steps=10,
+        overwrite=True,
+        exp_name="debug_pi05_rtc",
+        wandb_enabled=False,
+    ),
+    TrainConfig(
         name="pi05_tienkung_finetune",
         model=pi0_config.Pi0Config(pi05=True),
         data=LeRobotTienkungDataConfig(
@@ -1087,6 +1107,32 @@ _CONFIGS = [
         num_train_steps=10_000,
     ),
     TrainConfig(
+        name="pi05_tienkung_finetune_rtc",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            rtc_training=pi0_config.RTCTrainingConfig(
+                enabled=True,
+                min_prefix_steps=0,
+                max_prefix_steps=25,
+                execution_horizon=25,
+            ),
+        ),
+        data=LeRobotTienkungDataConfig(
+            repo_id="caobochun/tienkung_dual_hands_take_box_13_26d",
+            assets=AssetsConfig(assets_dir="./assets/pi05_tienkung_finetune"),
+            base_config=DataConfig(
+                lerobot_root="/data/caobochun/openpi/data/lerobot/caobochun/tienkung_dual_hands_take_box_13_26d",
+                prompt_from_task=True,
+            ),
+            default_prompt="Pick up the black box on the table with both hands, hold it briefly, then put the box down.",
+            extra_delta_transform=True,
+        ),
+        # RTC 训练使用 H=50、执行区间 s=25，并在 [0, 25] 内随机采样推理延迟 d，满足 d <= H - s。
+        weight_loader=weight_loaders.NoOpWeightLoader(),
+        pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
+        num_train_steps=10_000,
+    ),
+    TrainConfig(
         name="pi05_tienkung_dual_grippers_finetune",
         model=pi0_config.Pi0Config(pi05=True),
         data=LeRobotTienkungGrippersDataConfig(
@@ -1099,6 +1145,31 @@ _CONFIGS = [
             extra_delta_transform=True,
         ),
         # 本地 pi05_base 是 PyTorch safetensors 格式，使用 train_pytorch.py 时从这里加载。
+        weight_loader=weight_loaders.NoOpWeightLoader(),
+        pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
+        num_train_steps=10_000,
+    ),
+    TrainConfig(
+        name="pi05_tienkung_dual_grippers_finetune_rtc",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            rtc_training=pi0_config.RTCTrainingConfig(
+                enabled=True,
+                min_prefix_steps=0,
+                max_prefix_steps=25,
+                execution_horizon=25,
+            ),
+        ),
+        data=LeRobotTienkungGrippersDataConfig(
+            repo_id="caobochun/tienkung_dual_grippers_take_box_13_16d",
+            base_config=DataConfig(
+                lerobot_root="/data/caobochun/openpi/data/lerobot/caobochun/tienkung_dual_grippers_take_box_13_16d",
+                prompt_from_task=True,
+            ),
+            default_prompt="Pick up the black box on the table with both hands, hold it briefly, then put the box down.",
+            extra_delta_transform=True,
+        ),
+        # RTC 训练使用 H=50、执行区间 s=25，并在 [0, 25] 内随机采样推理延迟 d，满足 d <= H - s。
         weight_loader=weight_loaders.NoOpWeightLoader(),
         pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
         num_train_steps=10_000,

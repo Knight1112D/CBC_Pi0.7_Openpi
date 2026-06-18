@@ -25,21 +25,24 @@ def get_safe_dtype(target_dtype, device_type):
 def create_sinusoidal_pos_embedding(
     time: torch.tensor, dimension: int, min_period: float, max_period: float, device="cpu"
 ) -> Tensor:
-    """Computes sine-cosine positional embedding vectors for scalar positions."""
+    """Computes sine-cosine positional embedding vectors for scalar or token positions."""
     if dimension % 2 != 0:
         raise ValueError(f"dimension ({dimension}) must be divisible by 2")
 
-    if time.ndim != 1:
-        raise ValueError("The time tensor is expected to be of shape `(batch_size, )`.")
+    if time.ndim not in (1, 2):
+        raise ValueError("The time tensor is expected to have shape `(batch_size,)` or `(batch_size, horizon)`.")
 
     dtype = get_safe_dtype(torch.float64, device.type)
     fraction = torch.linspace(0.0, 1.0, dimension // 2, dtype=dtype, device=device)
     period = min_period * (max_period / min_period) ** fraction
 
-    # Compute the outer product
+    # 先展平再还原，兼容 batch 级和 action-token 级 timestep。
+    original_shape = time.shape
+    flat_time = time.reshape(-1).to(dtype=dtype)
     scaling_factor = 1.0 / period * 2 * math.pi
-    sin_input = scaling_factor[None, :] * time[:, None]
-    return torch.cat([torch.sin(sin_input), torch.cos(sin_input)], dim=1)
+    sin_input = scaling_factor[None, :] * flat_time[:, None]
+    emb = torch.cat([torch.sin(sin_input), torch.cos(sin_input)], dim=1)
+    return emb.reshape(*original_shape, dimension)
 
 
 def sample_beta(alpha, beta, bsize, device):
@@ -184,6 +187,40 @@ class PI0Pytorch(nn.Module):
         time = time_beta * 0.999 + 0.001
         return time.to(dtype=torch.float32, device=device)
 
+    def _sample_rtc_prefix_steps(self, bsize, device):
+        """按配置采样训练时 RTC 前缀长度。"""
+        rtc_config = getattr(self.config, "rtc_training", None)
+        if rtc_config is None or not rtc_config.enabled:
+            return None
+
+        execution_horizon = rtc_config.execution_horizon
+        if execution_horizon is None:
+            execution_horizon = self.config.action_horizon // 2
+
+        legal_max_prefix = self.config.action_horizon - execution_horizon
+        if legal_max_prefix < 0:
+            raise ValueError(
+                "RTC training requires execution_horizon <= action_horizon, "
+                f"got execution_horizon={execution_horizon}, action_horizon={self.config.action_horizon}."
+            )
+
+        configured_max = rtc_config.max_prefix_steps
+        if configured_max is None:
+            configured_max = legal_max_prefix
+        max_prefix_steps = min(configured_max, legal_max_prefix)
+        min_prefix_steps = min(rtc_config.min_prefix_steps, max_prefix_steps)
+
+        if max_prefix_steps == min_prefix_steps:
+            prefix_steps = torch.full((bsize,), max_prefix_steps, dtype=torch.long, device=device)
+        else:
+            prefix_steps = torch.randint(min_prefix_steps, max_prefix_steps + 1, (bsize,), device=device)
+
+        if rtc_config.prefix_probability < 1.0:
+            use_prefix = torch.rand((bsize,), device=device) < rtc_config.prefix_probability
+            prefix_steps = torch.where(use_prefix, prefix_steps, torch.zeros_like(prefix_steps))
+
+        return prefix_steps
+
     def embed_prefix(
         self, images, img_masks, lang_tokens, lang_masks
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -317,19 +354,39 @@ class PI0Pytorch(nn.Module):
     def forward(self, observation, actions, noise=None, time=None) -> Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
         images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=True)
+        # LeRobot 归一化可能产出 float64，进入 PyTorch 模型前统一为 float32。
+        actions = actions.to(dtype=torch.float32)
 
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 
         if time is None:
             time = self.sample_time(actions.shape[0], actions.device)
+        else:
+            time = time.reshape(actions.shape[0])
 
         time_expanded = time[:, None, None]
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
+        loss_scale = None
+        model_time = time
+
+        prefix_steps = self._sample_rtc_prefix_steps(actions.shape[0], actions.device)
+        if prefix_steps is not None:
+            step_ids = torch.arange(self.config.action_horizon, device=actions.device)[None, :]
+            prefix_mask = step_ids < prefix_steps[:, None]
+            postfix_mask = ~prefix_mask
+            postfix_time = time[:, None].expand(-1, self.config.action_horizon)
+            # OpenPI 的 flow 约定是 time=0 为清晰动作、time=1 为噪声。
+            model_time = torch.where(prefix_mask, torch.zeros_like(postfix_time), postfix_time)
+            x_t = model_time[:, :, None] * noise + (1 - model_time[:, :, None]) * actions
+
+            valid_postfix_steps = postfix_mask.sum(dim=1).clamp_min(1).to(dtype=x_t.dtype)
+            loss_scale = postfix_mask[:, :, None].to(dtype=x_t.dtype)
+            loss_scale = loss_scale * (self.config.action_horizon / valid_postfix_steps[:, None, None])
 
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks)
-        suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, time)
+        suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, model_time)
         if (
             self.paligemma_with_expert.paligemma.language_model.layers[0].self_attn.q_proj.weight.dtype
             == torch.bfloat16
@@ -371,20 +428,32 @@ class PI0Pytorch(nn.Module):
 
         v_t = self._apply_checkpoint(action_out_proj_func, suffix_out)
 
-        return F.mse_loss(u_t, v_t, reduction="none")
+        losses = F.mse_loss(u_t, v_t, reduction="none")
+        if loss_scale is not None:
+            losses = losses * loss_scale
+        return losses
 
-    def sample_actions(self, device, observation, noise=None, num_steps=10, rtc_guidance=None) -> Tensor:
+    def sample_actions(self, device, observation, noise=None, num_steps=10, rtc_guidance=None, rtc_prefix=None) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
         if rtc_guidance is None:
             with torch.no_grad():
-                return self._sample_actions_impl(device, observation, noise=noise, num_steps=num_steps)
+                return self._sample_actions_impl(
+                    device, observation, noise=noise, num_steps=num_steps, rtc_prefix=rtc_prefix
+                )
         with torch.enable_grad():
             return self._sample_actions_impl(
-                device, observation, noise=noise, num_steps=num_steps, rtc_guidance=rtc_guidance
+                device,
+                observation,
+                noise=noise,
+                num_steps=num_steps,
+                rtc_guidance=rtc_guidance,
+                rtc_prefix=rtc_prefix,
             )
 
-    def _sample_actions_impl(self, device, observation, noise=None, num_steps=10, rtc_guidance=None) -> Tensor:
-        """执行 flow matching 采样，可选加入 RTC guided velocity correction。"""
+    def _sample_actions_impl(
+        self, device, observation, noise=None, num_steps=10, rtc_guidance=None, rtc_prefix=None
+    ) -> Tensor:
+        """执行 flow matching 采样，可选加入 RTC guidance 或训练时 RTC hard-prefix。"""
         bsize = observation.state.shape[0]
         if noise is None:
             actions_shape = (bsize, self.config.action_horizon, self.config.action_dim)
@@ -412,11 +481,18 @@ class PI0Pytorch(nn.Module):
         dt = torch.tensor(dt, dtype=torch.float32, device=device)
 
         x_t = noise
+        rtc_prefix_actions, rtc_prefix_mask = self._prepare_rtc_prefix(x_t, rtc_prefix)
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
         while time >= -dt / 2:
+            if rtc_prefix_mask is not None:
+                x_t = torch.where(rtc_prefix_mask[:, :, None], rtc_prefix_actions, x_t)
             if rtc_guidance is not None:
                 x_t = x_t.detach().requires_grad_(requires_grad=True)
-            expanded_time = time.expand(bsize)
+            if rtc_prefix_mask is None:
+                expanded_time = time.expand(bsize)
+            else:
+                postfix_time = time.expand(bsize, self.config.action_horizon)
+                expanded_time = torch.where(rtc_prefix_mask, torch.zeros_like(postfix_time), postfix_time)
             v_t = self.denoise_step(
                 state,
                 prefix_pad_masks,
@@ -433,6 +509,35 @@ class PI0Pytorch(nn.Module):
                 x_t = x_t.detach()
             time += dt
         return x_t
+
+    def _prepare_rtc_prefix(self, x_t, rtc_prefix):
+        """准备训练时 RTC 推理的 hard-prefix 动作和 mask。"""
+        if rtc_prefix is None:
+            return None, None
+        action_prefix = rtc_prefix.get("action_prefix", rtc_prefix.get("target_actions"))
+        if action_prefix is None:
+            raise ValueError("rtc_prefix must contain `action_prefix` or `target_actions`.")
+        action_prefix = action_prefix.to(device=x_t.device, dtype=x_t.dtype)
+        if action_prefix.ndim == 2:
+            action_prefix = action_prefix[None, ...]
+        if action_prefix.shape[0] == 1 and x_t.shape[0] > 1:
+            action_prefix = action_prefix.expand(x_t.shape[0], -1, -1)
+        if action_prefix.shape != x_t.shape:
+            raise ValueError(f"rtc_prefix action shape {action_prefix.shape} must equal sample shape {x_t.shape}.")
+
+        delay = rtc_prefix.get("delay", rtc_prefix.get("prefix_steps"))
+        if delay is None:
+            raise ValueError("rtc_prefix must contain `delay` or `prefix_steps`.")
+        delay = torch.as_tensor(delay, dtype=torch.long, device=x_t.device)
+        if delay.ndim == 0:
+            delay = delay.expand(x_t.shape[0])
+        if delay.shape[0] == 1 and x_t.shape[0] > 1:
+            delay = delay.expand(x_t.shape[0])
+        if delay.shape != (x_t.shape[0],):
+            raise ValueError(f"rtc_prefix delay shape {delay.shape} must be `(batch_size,)`.")
+        delay = delay.clamp(min=0, max=self.config.action_horizon)
+        step_ids = torch.arange(self.config.action_horizon, device=x_t.device)[None, :]
+        return action_prefix, step_ids < delay[:, None]
 
     def _rtc_guidance_correction(self, x_t, v_t, time, rtc_guidance):
         """计算 Real-Time Chunking 的 ΠGDM 速度修正量。"""

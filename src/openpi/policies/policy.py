@@ -67,14 +67,17 @@ class Policy(BasePolicy):
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
         rtc_guidance = obs.get("rtc_guidance")
+        rtc_prefix = obs.get("rtc_prefix")
         obs_without_guidance = dict(obs)
         obs_without_guidance.pop("rtc_guidance", None)
+        obs_without_guidance.pop("rtc_prefix", None)
 
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs_without_guidance)
         inputs = self._input_transform(inputs)
 
         rtc_sample_kwargs = self._prepare_rtc_guidance(obs_without_guidance, rtc_guidance)
+        rtc_sample_kwargs.update(self._prepare_rtc_prefix(obs_without_guidance, rtc_prefix))
 
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
@@ -113,6 +116,42 @@ class Policy(BasePolicy):
         }
         return outputs
 
+    def _prepare_rtc_prefix(self, obs: dict, rtc_prefix: dict | None) -> dict[str, Any]:
+        """把训练时 RTC hard-prefix 动作转换到模型采样空间。"""
+        if rtc_prefix is None:
+            return {}
+        if not self._is_pytorch_model:
+            raise ValueError("当前 RTC hard-prefix inference 只实现了 PyTorch 模型路径。")
+
+        action_prefix = np.asarray(
+            rtc_prefix.get("action_prefix", rtc_prefix.get("target_actions")), dtype=np.float32
+        )
+        if action_prefix.ndim != 2:
+            raise ValueError(f"rtc_prefix action_prefix 必须是二维数组，当前 shape={action_prefix.shape}")
+
+        prefix_obs = jax.tree.map(lambda x: x, obs)
+        prefix_obs["actions"] = action_prefix
+        transformed = self._input_transform(prefix_obs)
+        model_prefix = np.asarray(transformed["actions"], dtype=np.float32)
+
+        model_config = getattr(self._model, "config", None)
+        model_horizon = int(getattr(model_config, "action_horizon", model_prefix.shape[0]))
+        model_action_dim = int(getattr(model_config, "action_dim", model_prefix.shape[-1]))
+        model_prefix = self._resize_rtc_array(
+            model_prefix,
+            target_horizon=model_horizon,
+            target_dim=model_action_dim,
+            fill_value=0.0,
+        )
+
+        delay = int(rtc_prefix.get("delay", rtc_prefix.get("prefix_steps", 0)))
+        return {
+            "rtc_prefix": {
+                "action_prefix": torch.from_numpy(model_prefix[None, ...]).to(self._pytorch_device),
+                "delay": delay,
+            }
+        }
+
     def _prepare_rtc_guidance(self, obs: dict, rtc_guidance: dict | None) -> dict[str, Any]:
         """把部署侧 RTC 目标动作转换到模型采样空间。"""
         if rtc_guidance is None:
@@ -134,12 +173,21 @@ class Policy(BasePolicy):
         transformed = self._input_transform(guidance_obs)
         model_targets = np.asarray(transformed["actions"], dtype=np.float32)
 
-        if weights.shape[-1] < model_targets.shape[-1]:
-            pad_width = [(0, 0)] * weights.ndim
-            pad_width[-1] = (0, model_targets.shape[-1] - weights.shape[-1])
-            weights = np.pad(weights, pad_width, constant_values=0.0)
-        else:
-            weights = weights[..., : model_targets.shape[-1]]
+        model_config = getattr(self._model, "config", None)
+        model_horizon = int(getattr(model_config, "action_horizon", model_targets.shape[0]))
+        model_action_dim = int(getattr(model_config, "action_dim", model_targets.shape[-1]))
+        model_targets = self._resize_rtc_array(
+            model_targets,
+            target_horizon=model_horizon,
+            target_dim=model_action_dim,
+            fill_value=0.0,
+        )
+        weights = self._resize_rtc_array(
+            weights,
+            target_horizon=model_horizon,
+            target_dim=model_action_dim,
+            fill_value=0.0,
+        )
 
         return {
             "rtc_guidance": {
@@ -149,6 +197,22 @@ class Policy(BasePolicy):
                 "eps": float(rtc_guidance.get("eps", 1e-4)),
             }
         }
+
+    @staticmethod
+    def _resize_rtc_array(
+        value: np.ndarray,
+        *,
+        target_horizon: int,
+        target_dim: int,
+        fill_value: float,
+    ) -> np.ndarray:
+        """把 RTC guidance 数组补齐或截断到模型动作形状。"""
+        value = np.asarray(value, dtype=np.float32)
+        resized = np.full((target_horizon, target_dim), fill_value, dtype=np.float32)
+        copy_horizon = min(value.shape[0], target_horizon)
+        copy_dim = min(value.shape[-1], target_dim)
+        resized[:copy_horizon, :copy_dim] = value[:copy_horizon, :copy_dim]
+        return resized
 
     @property
     def metadata(self) -> dict[str, Any]:

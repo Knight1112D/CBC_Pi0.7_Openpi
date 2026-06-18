@@ -27,7 +27,7 @@
 - 新增 `RTCTrainingConfig` 配置，并接入 `pi05_tienkung_finetune_rtc` 训练配置。
 - 在 PyTorch pi0.5 训练路径中按样本随机采样 prefix delay，将 prefix token 作为无噪动作条件输入，postfix token 继续执行 flow matching 加噪和 loss。
 - 在采样路径中支持 `rtc_prefix`，每个 denoise step 都 hard overwrite prefix，并让 prefix token 使用 OpenPI 当前 flow 公式下的 clean endpoint。
-- 更新策略接口和天工示例客户端，移除旧推理期 RTC guidance 字段，保留部署侧按真实 observed delay 跳过 prefix、执行 postfix 的路径。
+- 更新策略接口和异步客户端示例，移除旧推理期 RTC guidance 字段，保留部署侧按真实 observed delay 跳过 prefix、执行 postfix 的路径。
 - 新增 `examples/tienkung/rtc_chunker_test.py` 和 `examples/tienkung/simulate_rtc_replay.py`，用于 chunk suffix 融合和 hard-prefix replay smoke。
 - 补充 `docs/cbc/README.md` 和 `docs/cbc/training_time_rtc.md`，记录参数选择、训练逻辑、部署逻辑、验证结果和后续实验建议。
 
@@ -48,7 +48,7 @@
 - [ ] 增加 RTC delay 分布配置：`uniform`、`exp`、`empirical`。
 - [ ] 基于真实部署延迟日志生成 empirical delay histogram。
 - [ ] 做离线 delay sweep：`d=0..25, s=25`。
-- [ ] 对比普通 async、training-time RTC hard-prefix、历史 inference-time guidance。
+- [ ] 对比普通 async、fixed-horizon RTC、delay-adaptive RTC、suffix soft blending、training-time RTC hard-prefix 和历史 inference-time guidance。
 - [ ] 设计 RECAP metadata 和 sidecar label 格式。
 - [ ] 增加 RECAP debug config 和 1-2 step smoke test。
 - [ ] 设计可选 MEM/context 输入字段。

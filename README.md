@@ -1,5 +1,7 @@
 # CBC_Pi0.7_Openpi
 
+Language: English | [简体中文](README.zh-CN.md)
+
 ## Overview
 
 `CBC_Pi0.7_Openpi` is an unofficial personal research and engineering attempt to build a more complete OpenPI project for humanoid robot VLA research.

@@ -123,9 +123,7 @@ class Policy(BasePolicy):
         if not self._is_pytorch_model:
             raise ValueError("当前 RTC hard-prefix inference 只实现了 PyTorch 模型路径。")
 
-        action_prefix = np.asarray(
-            rtc_prefix.get("action_prefix", rtc_prefix.get("target_actions")), dtype=np.float32
-        )
+        action_prefix = np.asarray(rtc_prefix.get("action_prefix", rtc_prefix.get("target_actions")), dtype=np.float32)
         if action_prefix.ndim != 2:
             raise ValueError(f"rtc_prefix action_prefix 必须是二维数组，当前 shape={action_prefix.shape}")
 

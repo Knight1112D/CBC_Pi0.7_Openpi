@@ -11,9 +11,8 @@ import dataclasses
 from pathlib import Path
 
 import numpy as np
-import tyro
-
 from rtc_chunker import RtcChunker
+import tyro
 
 
 @dataclasses.dataclass
@@ -121,7 +120,9 @@ def run(args: Args) -> None:
     metrics["max_delay_steps"] = float(np.max(observed_delays)) if observed_delays else 0.0
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(args.output, executed_actions=executed_arr, observed_delays=np.asarray(observed_delays), **metrics)
+    np.savez_compressed(
+        args.output, executed_actions=executed_arr, observed_delays=np.asarray(observed_delays), **metrics
+    )
     print(f"RTC replay 已保存: {args.output}")
     for key, value in metrics.items():
         print(f"{key}={value:.6f}")

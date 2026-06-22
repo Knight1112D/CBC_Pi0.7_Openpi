@@ -360,10 +360,7 @@ class PI0Pytorch(nn.Module):
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 
-        if time is None:
-            time = self.sample_time(actions.shape[0], actions.device)
-        else:
-            time = time.reshape(actions.shape[0])
+        time = self.sample_time(actions.shape[0], actions.device) if time is None else time.reshape(actions.shape[0])
 
         time_expanded = time[:, None, None]
         x_t = time_expanded * noise + (1 - time_expanded) * actions
@@ -433,7 +430,9 @@ class PI0Pytorch(nn.Module):
             losses = losses * loss_scale
         return losses
 
-    def sample_actions(self, device, observation, noise=None, num_steps=10, rtc_guidance=None, rtc_prefix=None) -> Tensor:
+    def sample_actions(
+        self, device, observation, noise=None, num_steps=10, rtc_guidance=None, rtc_prefix=None
+    ) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
         if rtc_guidance is None:
             with torch.no_grad():

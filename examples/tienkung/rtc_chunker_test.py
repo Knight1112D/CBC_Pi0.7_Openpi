@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from rtc_chunker import RtcChunker
 
 

@@ -42,7 +42,7 @@ OpenPI currently provides a strong open-source base for `pi0`, `pi0-FAST`, and `
 This project aims to turn those public ideas into a more complete, runnable OpenPI-style engineering stack:
 
 - Humanoid robot VLA training, inference, and evaluation inside the OpenPI codebase.
-- `pi0.5`-style higher-level semantic generalization and knowledge-insulation-inspired experiments.
+- `pi0.5`-style higher-level semantic generalization and KI (Knowledge Insulation / Knowledge Isolation) experiments.
 - RTC / real-time action chunking for remote VLA inference.
 - `pi0.6`-style RECAP, RL, human intervention labels, value proxies, and advantage-conditioned policies.
 - MEM-style memory, task context, and recovery mechanisms.
@@ -60,15 +60,7 @@ That repository is a data-collection reference. This repository is focused on bu
 
 ## Roadmap
 
-### 1. OpenPI Foundation
-
-- [x] Preserve upstream OpenPI credit, license files, and README reference.
-- [x] Keep the project as a code-only mirror with no model weights, datasets, virtual environments, or training logs.
-- [x] Add a public project README explaining the unofficial scope.
-- [ ] Keep the upstream OpenPI baseline reproducible after each project change.
-- [ ] Add project smoke tests for new model, data, and policy-server paths.
-
-### 2. Humanoid VLA Deployment
+### 1. Humanoid VLA Deployment
 
 - [ ] Define a humanoid observation/action interface inside the OpenPI data and policy transform stack.
 - [ ] Add dry-run and replay-mode policy clients for local validation.
@@ -76,14 +68,17 @@ That repository is a data-collection reference. This repository is focused on bu
 - [ ] Add robot-side safety contracts for joint ordering, limits, frequency, interpolation, and stop behavior.
 - [ ] Keep robot-specific bridges isolated from the core OpenPI reproduction work.
 
-### 3. pi0.5-Style Semantics
+### 2. pi0.5-Style Semantics / KI
 
 - [ ] Compare the public `pi0.5` implementation with the public descriptions of higher-level semantic generalization.
 - [ ] Test prompt sensitivity, task context, and visual semantic changes on humanoid manipulation datasets.
 - [ ] Explore multi-task or multi-scene mixtures for semantic generalization.
-- [ ] Try controlled freezing, adapters, data weighting, or knowledge-insulation-inspired training recipes.
+- [ ] Add KI-lite experiments on the OpenPI PyTorch pi0.5 path: train VLM motor representations with FAST action-token CE, train the action expert with flow loss, and stop flow/action-expert gradients from flowing back into the VLM backbone.
+- [ ] Keep `stop-gradient only` separate from true KI-lite; do not call the work KI unless FAST CE and flow loss are both part of the experiment.
+- [ ] Test KI with RTC as composable switches, without breaking training-time delay sampling, hard-prefix sampling, or masked postfix loss.
+- [ ] Try controlled freezing, adapters, data weighting, and KI-inspired training recipes.
 
-### 4. RTC / Real-Time Chunking
+### 3. RTC / Real-Time Chunking
 
 RTC is the current priority for improving remote-inference stability. In an asynchronous humanoid policy-server setup, the robot control loop keeps publishing actions at a fixed rate while the model generates the next action chunk in the background. Actions that have already been executed, or will be executed before the next chunk arrives, become the hard prefix of the new chunk. The RTC goal is to make the newly generated chunk remain continuous with those committed actions under nonzero inference latency.
 
@@ -107,7 +102,7 @@ Next experiments:
 - [ ] Report latency, replan frequency, action smoothness, prefix/postfix discontinuity, and rollout stability.
 - [ ] If model-side inference-time guidance is revisited, keep it as an experimental switch and comparison baseline rather than the default deployment path.
 
-### 5. pi0.6-Style RECAP / RL
+### 4. pi0.6-Style RECAP / RL
 
 - [ ] Define generic episode metadata for success, failure, evaluation episodes, and human intervention.
 - [ ] Generate sidecar labels for `advantage_indicator`, `use_advantage`, and `is_human_intervention`.
@@ -117,14 +112,14 @@ Next experiments:
 - [ ] Add a small debug config for 1-2 step smoke tests.
 - [ ] Compare standard SFT and RECAP-style fine-tuning.
 
-### 6. MEM / Memory
+### 5. MEM / Memory
 
 - [ ] Survey public MEM-related materials and reproducible implementation clues.
 - [ ] Design optional memory/context fields for recent history, task state, failures, and recovery hints.
 - [ ] Keep memory inputs optional so existing OpenPI policies remain compatible.
 - [ ] Evaluate behavior with and without memory context.
 
-### 7. pi0.7-Inspired World Model
+### 6. pi0.7-Inspired World Model
 
 - [ ] Summarize public pi0.7 paper/blog concepts and separate them from project assumptions.
 - [ ] Design world-model-style intermediate representations or visual-subgoal inputs.

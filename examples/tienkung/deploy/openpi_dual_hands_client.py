@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """天工双手 pi0.5 异步推理部署入口。"""
+# ruff: noqa: E402
 
 from __future__ import annotations
 

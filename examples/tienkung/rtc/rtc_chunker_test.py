@@ -1,4 +1,5 @@
 """Training-time RTC 调度层离线单元测试。"""
+# ruff: noqa: E402
 
 from __future__ import annotations
 

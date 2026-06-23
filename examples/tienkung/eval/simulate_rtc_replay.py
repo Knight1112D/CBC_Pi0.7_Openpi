@@ -4,6 +4,7 @@
 该脚本只读取动作 chunk 文件或生成合成 chunk，不连接 ROS、不访问 policy server、
 不发布机器人动作。用于快速检查固定延迟下 hard-prefix 跳过和执行序列连续性。
 """
+# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -126,7 +127,9 @@ def run(args: Args) -> None:
     metrics["max_delay_steps"] = float(np.max(observed_delays)) if observed_delays else 0.0
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(args.output, executed_actions=executed_arr, observed_delays=np.asarray(observed_delays), **metrics)
+    np.savez_compressed(
+        args.output, executed_actions=executed_arr, observed_delays=np.asarray(observed_delays), **metrics
+    )
     print(f"RTC replay 已保存: {args.output}")
     for key, value in metrics.items():
         print(f"{key}={value:.6f}")

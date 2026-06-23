@@ -12,18 +12,18 @@ from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy
 from rclpy.qos import QoSProfile
 from rclpy.qos import QoSReliabilityPolicy
-from tienkung_config import MODEL_IMAGE_SIZE
-from tienkung_config import Args
-from tienkung_config import RobotLayout
+from sensor_msgs.msg import CompressedImage
+from examples.tienkung.common.tienkung_config import MODEL_IMAGE_SIZE
+from examples.tienkung.common.tienkung_config import Args
+from examples.tienkung.common.tienkung_config import RobotLayout
 
 try:
     from foxglove_msgs.msg import CompressedVideo
 
-    COMPRESSED_IMAGE_MSG = CompressedVideo
 except ImportError:
-    from sensor_msgs.msg import CompressedImage
+    CompressedVideo = None
 
-    COMPRESSED_IMAGE_MSG = CompressedImage
+COMPRESSED_IMAGE_MSG = CompressedVideo or CompressedImage
 
 
 def decode_compressed_image(msg) -> np.ndarray | None:
@@ -35,6 +35,17 @@ def decode_compressed_image(msg) -> np.ndarray | None:
         return None
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     return image_tools.convert_to_uint8(image_tools.resize_with_pad(image_rgb, MODEL_IMAGE_SIZE, MODEL_IMAGE_SIZE))
+
+
+def image_msg_class(image_type: str):
+    """根据配置返回图像消息类型。"""
+    if image_type == "compressed_image":
+        return CompressedImage
+    if image_type == "compressed_video":
+        if CompressedVideo is None:
+            raise ImportError("当前环境缺少 foxglove_msgs，无法订阅 compressed_video 图像。")
+        return CompressedVideo
+    raise ValueError(f"未知图像消息类型: {image_type}")
 
 
 class TienkungRosIO:
@@ -60,19 +71,19 @@ class TienkungRosIO:
 
         node.create_subscription(MotorStatusMsg, args.arm_status_topic, self._motor_status_callback, qos_best_effort)
         node.create_subscription(
-            COMPRESSED_IMAGE_MSG,
+            image_msg_class(args.base_image_type),
             args.base_image_topic,
             lambda msg: self._image_callback("base", msg),
             qos_best_effort,
         )
         node.create_subscription(
-            COMPRESSED_IMAGE_MSG,
+            image_msg_class(args.left_wrist_image_type),
             args.left_wrist_image_topic,
             lambda msg: self._image_callback("left", msg),
             qos_best_effort,
         )
         node.create_subscription(
-            COMPRESSED_IMAGE_MSG,
+            image_msg_class(args.right_wrist_image_type),
             args.right_wrist_image_topic,
             lambda msg: self._image_callback("right", msg),
             qos_best_effort,

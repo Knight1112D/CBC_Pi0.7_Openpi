@@ -98,8 +98,8 @@ x_t = time * noise + (1 - time) * action
 ```text
 src/openpi/policies/policy.py
 src/openpi/models_pytorch/pi0_pytorch.py
-examples/tienkung/rtc_chunker.py
-examples/tienkung/openpi_dual_hands_client.py
+examples/tienkung/rtc/rtc_chunker.py
+examples/tienkung/deploy/openpi_dual_hands_client.py
 ```
 
 部署侧传入：
@@ -130,6 +130,47 @@ rtc_guidance_decay
 rtc_guidance_eps
 rtc_blend_steps
 rtc_soft_preserve_weight
+```
+
+## 部署调度和计时
+
+普通 async 控制器现在默认：
+
+```text
+request_immediately_after_chunk=True
+```
+
+也就是收到上一段 action chunk、填充执行队列后，如果没有正在进行的推理，会立刻用最新观测提交下一次异步推理。`request_when_remaining_steps` 保留为关闭立即重规划后的低水位触发参数。
+
+RTC 控制器仍然使用 `RtcChunker.should_request()`，不会每拿到 chunk 就立刻重规划。它需要等执行步数达到 `rtc_min_horizon` 或剩余动作不足以覆盖延迟估计时再请求，避免破坏 `s/d/prefix/postfix` 的对齐关系。
+
+推理返回会携带三层计时：
+
+```text
+client_timing.websocket_infer_ms       # 客户端 websocket infer 调用总耗时
+server_timing.recv_ms                  # server 等待/接收请求耗时
+server_timing.unpack_ms                # msgpack 解包耗时
+server_timing.infer_ms                 # server 调 policy.infer 耗时
+server_timing.pack_ms                  # msgpack 打包响应耗时
+policy_timing.observation_tokenize_ms  # OpenPI input transform/tokenize 耗时
+policy_timing.rtc_prefix_transform_ms  # rtc_prefix 动作进入模型空间的 transform 耗时
+policy_timing.tensorize_ms             # numpy 到 JAX/PyTorch batch tensor 耗时
+policy_timing.model_sample_ms          # model.sample_actions 耗时
+policy_timing.output_transform_ms      # 模型输出转回机器人动作空间耗时
+policy_timing.action_ready_ms          # policy 收到 observation 到动作可返回的总耗时
+model_timing.vlm_prefix_forward_ms     # 图像/语言 prefix KV 的 VLM 前向耗时
+model_timing.flow_denoise_ms           # flow matching 迭代降噪耗时
+model_timing.flow_denoise_steps        # 实际 denoise step 数
+```
+
+CUDA 计时在模型阶段边界做同步，因此数值比纯 Python wall-clock 更接近真实 GPU 执行时间，但会引入少量测量开销。部署客户端日志会打印紧凑摘要，保存 action chunk 时也会把 timing 字典写入 `.npz`。
+
+相机话题和消息类型已按 `Knight1112D/Tienkung_vla_collect_data` 的 `main@7899e361b32826b3ea3020ef2cc31cdb7a9c779a` 对齐：
+
+```text
+头部: /camera/color/image_raw/compressed, sensor_msgs/msg/CompressedImage
+左手: /camera/d405_left/color/image_h264, foxglove_msgs/msg/CompressedVideo
+右手: /camera/d405_right/color/image_h264, foxglove_msgs/msg/CompressedVideo
 ```
 
 ## 训练命令
@@ -167,8 +208,8 @@ CUDA_VISIBLE_DEVICES=5,7 WANDB_MODE=offline torchrun --standalone --nnodes=1 --n
 hard-prefix sample_actions 通过，输出 shape=(1, 50, 32)。
 train_pytorch 2 step smoke 通过。
 examples/tienkung 编译通过。
-rtc_chunker_test.py 通过。
-simulate_rtc_replay.py hard-prefix smoke 通过。
+examples/tienkung/rtc/rtc_chunker_test.py 通过。
+examples/tienkung/eval/simulate_rtc_replay.py hard-prefix smoke 通过。
 ```
 
 ## 后续建议

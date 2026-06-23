@@ -1,5 +1,6 @@
 import logging
 import math
+import time
 
 import torch
 from torch import Tensor
@@ -50,6 +51,12 @@ def sample_beta(alpha, beta, bsize, device):
     beta_t = torch.as_tensor(beta, dtype=torch.float32, device=device)
     dist = torch.distributions.Beta(alpha_t, beta_t)
     return dist.sample((bsize,))
+
+
+def _sync_if_cuda(device):
+    """同步 CUDA 队列，避免异步执行导致计时偏小。"""
+    if torch.cuda.is_available() and torch.device(device).type == "cuda":
+        torch.cuda.synchronize(device)
 
 
 def make_att_2d_masks(pad_masks, att_masks):
@@ -117,6 +124,7 @@ class PI0Pytorch(nn.Module):
 
         # Initialize gradient checkpointing flag
         self.gradient_checkpointing_enabled = False
+        self._last_sample_timing = {}
 
         msg = "transformers_replace is not installed correctly. Please install it with `uv pip install transformers==4.53.2` and `cp -r ./src/openpi/models_pytorch/transformers_replace/* .venv/lib/python3.11/site-packages/transformers/`."
         try:
@@ -363,7 +371,9 @@ class PI0Pytorch(nn.Module):
         time = self.sample_time(actions.shape[0], actions.device) if time is None else time.reshape(actions.shape[0])
 
         time_expanded = time[:, None, None]
+        # xt=tao*noise + (1-tao)*At
         x_t = time_expanded * noise + (1 - time_expanded) * actions
+        # ut=noise-At
         u_t = noise - actions
         loss_scale = None
         model_time = time
@@ -453,13 +463,19 @@ class PI0Pytorch(nn.Module):
         self, device, observation, noise=None, num_steps=10, rtc_guidance=None, rtc_prefix=None
     ) -> Tensor:
         """执行 flow matching 采样，可选加入 RTC guidance 或训练时 RTC hard-prefix。"""
+        total_start = time.perf_counter()
+        timing = {}
         bsize = observation.state.shape[0]
         if noise is None:
             actions_shape = (bsize, self.config.action_horizon, self.config.action_dim)
             noise = self.sample_noise(actions_shape, device)
 
+        preprocess_start = time.perf_counter()
         images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=False)
+        timing["model_preprocess_ms"] = (time.perf_counter() - preprocess_start) * 1000
 
+        _sync_if_cuda(device)
+        vlm_start = time.perf_counter()
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks)
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
@@ -475,22 +491,27 @@ class PI0Pytorch(nn.Module):
             inputs_embeds=[prefix_embs, None],
             use_cache=True,
         )
+        _sync_if_cuda(device)
+        timing["vlm_prefix_forward_ms"] = (time.perf_counter() - vlm_start) * 1000
 
         dt = -1.0 / num_steps
         dt = torch.tensor(dt, dtype=torch.float32, device=device)
 
         x_t = noise
         rtc_prefix_actions, rtc_prefix_mask = self._prepare_rtc_prefix(x_t, rtc_prefix)
-        time = torch.tensor(1.0, dtype=torch.float32, device=device)
-        while time >= -dt / 2:
+        flow_time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        _sync_if_cuda(device)
+        flow_start = time.perf_counter()
+        denoise_steps = 0
+        while flow_time >= -dt / 2:
             if rtc_prefix_mask is not None:
                 x_t = torch.where(rtc_prefix_mask[:, :, None], rtc_prefix_actions, x_t)
             if rtc_guidance is not None:
                 x_t = x_t.detach().requires_grad_(requires_grad=True)
             if rtc_prefix_mask is None:
-                expanded_time = time.expand(bsize)
+                expanded_time = flow_time.expand(bsize)
             else:
-                postfix_time = time.expand(bsize, self.config.action_horizon)
+                postfix_time = flow_time.expand(bsize, self.config.action_horizon)
                 expanded_time = torch.where(rtc_prefix_mask, torch.zeros_like(postfix_time), postfix_time)
             v_t = self.denoise_step(
                 state,
@@ -500,13 +521,19 @@ class PI0Pytorch(nn.Module):
                 expanded_time,
             )
             if rtc_guidance is not None:
-                v_t = v_t + self._rtc_guidance_correction(x_t, v_t, time, rtc_guidance)
+                v_t = v_t + self._rtc_guidance_correction(x_t, v_t, flow_time, rtc_guidance)
 
             # Euler step - use new tensor assignment instead of in-place operation
             x_t = x_t + dt * v_t
             if rtc_guidance is not None:
                 x_t = x_t.detach()
-            time += dt
+            flow_time += dt
+            denoise_steps += 1
+        _sync_if_cuda(device)
+        timing["flow_denoise_ms"] = (time.perf_counter() - flow_start) * 1000
+        timing["flow_denoise_steps"] = denoise_steps
+        timing["model_sample_total_ms"] = (time.perf_counter() - total_start) * 1000
+        self._last_sample_timing = timing
         return x_t
 
     def _prepare_rtc_prefix(self, x_t, rtc_prefix):

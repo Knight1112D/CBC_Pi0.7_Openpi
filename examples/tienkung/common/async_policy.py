@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import queue
+import time
 import traceback
 from typing import Any
 
@@ -33,12 +34,20 @@ def _policy_worker(
             request_id = request["request_id"]
             observation = request["observation"]
             try:
+                infer_start = time.monotonic()
                 result = policy_client.infer(observation)
+                client_infer_ms = (time.monotonic() - infer_start) * 1000
                 response_queue.put(
                     {
                         "request_id": request_id,
                         "ok": True,
                         "actions": np.asarray(result["actions"], dtype=np.float32),
+                        "policy_timing": result.get("policy_timing", {}),
+                        "model_timing": result.get("model_timing", {}),
+                        "server_timing": result.get("server_timing", {}),
+                        "client_timing": {
+                            "websocket_infer_ms": client_infer_ms,
+                        },
                     }
                 )
             except Exception:

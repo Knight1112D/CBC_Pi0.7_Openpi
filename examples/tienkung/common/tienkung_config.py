@@ -23,9 +23,12 @@ class Args:
     ros_domain_id: str = "0"
     arm_status_topic: str = "/arm/status"
     arm_command_topic: str = "/arm/cmd_pos"
-    base_image_topic: str = "/camera/color/image_h264"
-    left_wrist_image_topic: str = "/camera/left_d405/color/image_h264"
-    right_wrist_image_topic: str = "/camera/right_d405/color/image_h264"
+    base_image_topic: str = "/camera/color/image_raw/compressed"
+    left_wrist_image_topic: str = "/camera/d405_left/color/image_h264"
+    right_wrist_image_topic: str = "/camera/d405_right/color/image_h264"
+    base_image_type: str = "compressed_image"
+    left_wrist_image_type: str = "compressed_video"
+    right_wrist_image_type: str = "compressed_video"
 
     # 电机顺序必须和训练数据一致：左臂7 + 左手6 + 右臂7 + 右手6。
     left_arm_joint_ids: str = "11,12,13,14,15,16,17"
@@ -46,6 +49,7 @@ class Args:
     max_action_chunk_len: int = 32
     interpolation: str = "linear"
     request_when_remaining_steps: int = 10
+    request_immediately_after_chunk: bool = True
     rtc_min_horizon: int = 8
     rtc_delay_buffer_size: int = 8
     rtc_initial_delay_steps: int = 8
@@ -59,7 +63,7 @@ class Args:
     hand_upper_limits: str = "1,1,1,1,1,1"
 
     # 日志
-    log_dir: str = "/data/caobochun/openpi/examples/tienkung_dual_hands/logs"
+    log_dir: str = "/data/caobochun/openpi/examples/tienkung/logs"
     save_action_chunks: bool = True
 
 

@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
 import numpy as np
-from rtc_chunker import RtcChunker
+
+OPENPI_ROOT = Path(__file__).resolve().parents[3]
+if str(OPENPI_ROOT) not in sys.path:
+    sys.path.insert(0, str(OPENPI_ROOT))
+
+from examples.tienkung.rtc.rtc_chunker import RtcChunker
 
 
 def test_rtc_chunker_skips_executed_prefix_after_delay() -> None:

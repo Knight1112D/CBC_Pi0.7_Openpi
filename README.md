@@ -95,7 +95,7 @@ Completed:
 - [x] Added training-time delay sampling to the PyTorch pi0.5 flow-matching path: prefix tokens use clean actions, postfix tokens stay noisy, and loss is computed only on valid postfix steps.
 - [x] Added `rtc_prefix` hard-prefix sampling support in `PI0Pytorch.sample_actions()`, with prefix tokens using the clean endpoint under the current OpenPI flow convention.
 - [x] Updated the policy interface and asynchronous client example so deployment skips already executed prefix steps according to observed delay and executes only the new postfix.
-- [x] Added `examples/tienkung/rtc_chunker_test.py` and `examples/tienkung/simulate_rtc_replay.py` for chunk suffix merging and hard-prefix replay smoke tests.
+- [x] Added RTC smoke tests and replay tools under `examples/tienkung/rtc/` and `examples/tienkung/eval/`.
 - [x] Verified real-batch forward/backward, hard-prefix `sample_actions`, 2-step training smoke, example compilation, and replay smoke.
 
 Next experiments:

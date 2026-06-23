@@ -66,6 +66,7 @@ class Policy(BasePolicy):
 
     @override
     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+        policy_start = time.monotonic()
         rtc_guidance = obs.get("rtc_guidance")
         rtc_prefix = obs.get("rtc_prefix")
         obs_without_guidance = dict(obs)
@@ -74,11 +75,16 @@ class Policy(BasePolicy):
 
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs_without_guidance)
+        transform_start = time.monotonic()
         inputs = self._input_transform(inputs)
+        transform_ms = (time.monotonic() - transform_start) * 1000
 
+        rtc_prepare_start = time.monotonic()
         rtc_sample_kwargs = self._prepare_rtc_guidance(obs_without_guidance, rtc_guidance)
         rtc_sample_kwargs.update(self._prepare_rtc_prefix(obs_without_guidance, rtc_prefix))
+        rtc_prepare_ms = (time.monotonic() - rtc_prepare_start) * 1000
 
+        tensorize_start = time.monotonic()
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
             inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
@@ -87,6 +93,7 @@ class Policy(BasePolicy):
             # Convert inputs to PyTorch tensors and move to correct device
             inputs = jax.tree.map(lambda x: torch.from_numpy(np.array(x)).to(self._pytorch_device)[None, ...], inputs)
             sample_rng_or_pytorch_device = self._pytorch_device
+        tensorize_ms = (time.monotonic() - tensorize_start) * 1000
 
         # Prepare kwargs for sample_actions
         sample_kwargs = dict(self._sample_kwargs)
@@ -98,22 +105,40 @@ class Policy(BasePolicy):
                 noise = noise[None, ...]  # Make it (1, action_horizon, action_dim)
             sample_kwargs["noise"] = noise
 
+        observation_start = time.monotonic()
         observation = _model.Observation.from_dict(inputs)
+        observation_ms = (time.monotonic() - observation_start) * 1000
         start_time = time.monotonic()
         outputs = {
             "state": inputs["state"],
             "actions": self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs),
         }
         model_time = time.monotonic() - start_time
+        model_timing = getattr(self._model, "_last_sample_timing", {})
+        numpy_start = time.monotonic()
         if self._is_pytorch_model:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...].detach().cpu()), outputs)
         else:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...]), outputs)
+        numpy_ms = (time.monotonic() - numpy_start) * 1000
 
+        output_transform_start = time.monotonic()
         outputs = self._output_transform(outputs)
+        output_transform_ms = (time.monotonic() - output_transform_start) * 1000
+        policy_total_ms = (time.monotonic() - policy_start) * 1000
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
+            "observation_tokenize_ms": transform_ms,
+            "rtc_prefix_transform_ms": rtc_prepare_ms,
+            "tensorize_ms": tensorize_ms,
+            "observation_pack_ms": observation_ms,
+            "model_sample_ms": model_time * 1000,
+            "to_numpy_ms": numpy_ms,
+            "output_transform_ms": output_transform_ms,
+            "action_ready_ms": policy_total_ms,
         }
+        if model_timing:
+            outputs["model_timing"] = model_timing
         return outputs
 
     def _prepare_rtc_prefix(self, obs: dict, rtc_prefix: dict | None) -> dict[str, Any]:

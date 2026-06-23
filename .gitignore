@@ -2,6 +2,8 @@
 assets/
 checkpoints/
 data/
+!examples/tienkung/data/
+!examples/tienkung/data/*.py
 wandb/
 
 # Byte-compiled / optimized / DLL files

@@ -6,21 +6,54 @@ from __future__ import annotations
 from collections import deque
 import os
 from pathlib import Path
+import sys
 import time
 
-from async_policy import AsyncPolicyProcess
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from ros_io import COMPRESSED_IMAGE_MSG
-from ros_io import TienkungRosIO
-from rtc_chunker import RtcChunker
-from tienkung_config import STATE_DIM
-from tienkung_config import Args
-from tienkung_config import build_robot_layout
-from tienkung_config import merge_config_file
-from trajectory import make_execution_plan
 import tyro
+
+OPENPI_ROOT = Path(__file__).resolve().parents[3]
+if str(OPENPI_ROOT) not in sys.path:
+    sys.path.insert(0, str(OPENPI_ROOT))
+
+from examples.tienkung.common.async_policy import AsyncPolicyProcess
+from examples.tienkung.common.ros_io import COMPRESSED_IMAGE_MSG
+from examples.tienkung.common.ros_io import TienkungRosIO
+from examples.tienkung.common.tienkung_config import STATE_DIM
+from examples.tienkung.common.tienkung_config import Args
+from examples.tienkung.common.tienkung_config import build_robot_layout
+from examples.tienkung.common.tienkung_config import merge_config_file
+from examples.tienkung.common.trajectory import make_execution_plan
+from examples.tienkung.rtc.rtc_chunker import RtcChunker
+
+
+def _format_timing(result: dict) -> str:
+    """把推理耗时整理成一行日志。"""
+    policy_timing = result.get("policy_timing", {})
+    model_timing = result.get("model_timing", {})
+    server_timing = result.get("server_timing", {})
+    client_timing = result.get("client_timing", {})
+    fields = [
+        ("client", client_timing.get("websocket_infer_ms")),
+        ("server", server_timing.get("infer_ms")),
+        ("ready", policy_timing.get("action_ready_ms")),
+        ("tokenize", policy_timing.get("observation_tokenize_ms")),
+        ("vlm", model_timing.get("vlm_prefix_forward_ms")),
+        ("flow", model_timing.get("flow_denoise_ms")),
+        ("steps", model_timing.get("flow_denoise_steps")),
+        ("out", policy_timing.get("output_transform_ms")),
+    ]
+    parts = []
+    for name, value in fields:
+        if value is None:
+            continue
+        if name == "steps":
+            parts.append(f"{name}={int(value)}")
+        else:
+            parts.append(f"{name}={float(value):.1f}ms")
+    return " ".join(parts)
 
 
 class TienkungDualHandsController(Node):
@@ -41,6 +74,7 @@ class TienkungDualHandsController(Node):
         self.last_action: np.ndarray | None = None
         self.inference_idx = 0
         self.last_request_time = 0.0
+        self.submit_next_after_result = False
 
         self.create_timer(1.0 / args.control_hz, self.control_loop)
         self.get_logger().info(f"连接 policy server: {args.remote_host}:{args.remote_port}")
@@ -91,12 +125,17 @@ class TienkungDualHandsController(Node):
                 self.log_dir / f"async_action_chunk_{self.inference_idx:06d}.npz",
                 raw_actions=result["actions"],
                 execution_plan=plan,
+                policy_timing=result.get("policy_timing", {}),
+                model_timing=result.get("model_timing", {}),
+                server_timing=result.get("server_timing", {}),
+                client_timing=result.get("client_timing", {}),
                 state=self.ros_io.get_state(),
                 timestamp=time.time(),
             )
+        self.submit_next_after_result = True
         self.get_logger().info(
             f"收到动作 chunk #{self.inference_idx}: raw={result['actions'].shape}, "
-            f"plan={plan.shape}, execute={execute_len}"
+            f"plan={plan.shape}, execute={execute_len} timing=[{_format_timing(result)}]"
         )
         self.inference_idx += 1
 
@@ -104,12 +143,20 @@ class TienkungDualHandsController(Node):
         """在执行队列即将耗尽时提交最新观测给推理进程。"""
         if self.policy.inflight:
             return
-        if len(self.execution_queue) > self.args.request_when_remaining_steps:
+        should_submit_after_chunk = self.args.request_immediately_after_chunk and self.submit_next_after_result
+        if not should_submit_after_chunk and len(self.execution_queue) > self.args.request_when_remaining_steps:
             return
+        build_start = time.monotonic()
         observation = self.ros_io.build_observation(self.args.prompt)
+        build_ms = (time.monotonic() - build_start) * 1000
         request_id = self.policy.submit_latest(observation)
         self.last_request_time = time.time()
-        self.get_logger().info(f"提交异步推理请求 #{request_id}", throttle_duration_sec=1.0)
+        self.submit_next_after_result = False
+        reason = "chunk_ready" if should_submit_after_chunk else f"remaining={len(self.execution_queue)}"
+        self.get_logger().info(
+            f"提交异步推理请求 #{request_id}: reason={reason}, build_observation={build_ms:.1f}ms",
+            throttle_duration_sec=1.0,
+        )
 
     def _publish_next_action(self) -> None:
         """按配置频率发布下一条动作；没有新动作时保持当前位置。"""
@@ -198,12 +245,17 @@ class TienkungDualHandsRtcController(Node):
                 execution_plan=plan,
                 merged_plan=merged_plan,
                 observed_delay_steps=observed_delay,
+                policy_timing=result.get("policy_timing", {}),
+                model_timing=result.get("model_timing", {}),
+                server_timing=result.get("server_timing", {}),
+                client_timing=result.get("client_timing", {}),
                 state=self.ros_io.get_state(),
                 timestamp=time.time(),
             )
         self.get_logger().info(
             f"RTC 收到 chunk #{self.inference_idx}: raw={result['actions'].shape}, "
-            f"plan={plan.shape}, merged={merged_plan.shape}, delay_steps={observed_delay}"
+            f"plan={plan.shape}, merged={merged_plan.shape}, delay_steps={observed_delay} "
+            f"timing=[{_format_timing(result)}]"
         )
         self.inference_idx += 1
 
@@ -211,7 +263,9 @@ class TienkungDualHandsRtcController(Node):
         """根据 RTC 条件提交下一次推理。"""
         if self.policy.inflight or not self.rtc.should_request():
             return
+        build_start = time.monotonic()
         observation = self.ros_io.build_observation(self.args.prompt)
+        build_ms = (time.monotonic() - build_start) * 1000
         prefix = self.rtc.make_action_prefix()
         if prefix is not None:
             action_prefix, delay = prefix
@@ -224,7 +278,8 @@ class TienkungDualHandsRtcController(Node):
         self.get_logger().info(
             f"RTC 提交推理请求 #{request_id}: s={context.executed_since_swap}, "
             f"d_est={context.delay_estimate_steps}, "
-            f"prefix_steps={0 if prefix is None else prefix[1]}, suffix={context.previous_suffix.shape}",
+            f"prefix_steps={0 if prefix is None else prefix[1]}, suffix={context.previous_suffix.shape}, "
+            f"build_observation={build_ms:.1f}ms",
             throttle_duration_sec=1.0,
         )
 

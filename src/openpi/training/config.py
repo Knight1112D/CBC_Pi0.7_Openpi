@@ -22,6 +22,7 @@ import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.policies.tienkung_dual_grippers_policy as tienkung_grippers_policy
 import openpi.policies.tienkung_dual_hands_policy as tienkung_policy
+import openpi.policies.zhuji_policy as zhuji_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -567,6 +568,57 @@ class LeRobotTienkungGrippersDataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
+class LeRobotZhujiDataConfig(DataConfigFactory):
+    """
+    配置 zhuji 机器人 LeRobot 数据在训练和推理前后的字段映射与动作变换。
+    """
+
+    extra_delta_transform: bool = False
+    default_prompt: str | None = None
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/base_image": "observation.images.cam_high",
+                        "observation/left_image": "observation.images.cam_left_wrist",
+                        "observation/right_image": "observation.images.cam_right_wrist",
+                        "observation/state": "observation.state",
+                        "actions": "action",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[zhuji_policy.ZhujiInputs(model_type=model_config.model_type)],
+            outputs=[zhuji_policy.ZhujiOutputs()],
+        )
+
+        if self.extra_delta_transform:
+            # 状态/动作顺序约定为：左臂 7 维、右臂 7 维、头部 2 维、左右夹爪 2 维。
+            # pi0.5 使用增量关节动作，左右夹爪仍保持绝对值。
+            delta_action_mask = _transforms.make_bool_mask(7, 7, 2, -2)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=("action",),
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class TrainConfig:
     # Name of the config. Must be unique. Will be used to reference this config.
     name: tyro.conf.Suppress[str]
@@ -1106,6 +1158,7 @@ _CONFIGS = [
         pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
         num_train_steps=10_000,
     ),
+    # 我加的关于天工双手动作适配 pi05_pytorch_pi05_rtc 的版本
     TrainConfig(
         name="pi05_tienkung_finetune_rtc",
         model=pi0_config.Pi0Config(
@@ -1149,6 +1202,7 @@ _CONFIGS = [
         pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
         num_train_steps=10_000,
     ),
+    # 我加的关于天工加爪动作适配 pi05_pytorch_pi05_rtc 的版本
     TrainConfig(
         name="pi05_tienkung_dual_grippers_finetune_rtc",
         model=pi0_config.Pi0Config(
@@ -1170,6 +1224,49 @@ _CONFIGS = [
             extra_delta_transform=True,
         ),
         # RTC 训练使用 H=50、执行区间 s=25，并在 [0, 25] 内随机采样推理延迟 d，满足 d <= H - s。
+        weight_loader=weight_loaders.NoOpWeightLoader(),
+        pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
+        num_train_steps=10_000,
+    ),
+    TrainConfig(
+        name="pi05_zhuji_finetune",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LeRobotZhujiDataConfig(
+            repo_id="caobochun/zhuji_pick_and_place",
+            base_config=DataConfig(
+                lerobot_root="/data/caobochun/openpi/data/lerobot/caobochun/zhuji_pick_and_place",
+                prompt_from_task=True,
+            ),
+            default_prompt="Move the plate to the center and put the yellow stick into it.",
+            extra_delta_transform=True,
+        ),
+        # 本地 pi05_base 是 PyTorch safetensors 格式，使用 train_pytorch.py 时从这里加载。
+        weight_loader=weight_loaders.NoOpWeightLoader(),
+        pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
+        num_train_steps=10_000,
+    ),
+    TrainConfig(
+        name="pi05_zhuji_finetune_rtc",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            rtc_training=pi0_config.RTCTrainingConfig(
+                enabled=True,
+                min_prefix_steps=0,
+                max_prefix_steps=25,
+                execution_horizon=25,
+            ),
+        ),
+        data=LeRobotZhujiDataConfig(
+            repo_id="caobochun/zhuji_pick_and_place",
+            assets=AssetsConfig(assets_dir="./assets/pi05_zhuji_finetune"),
+            base_config=DataConfig(
+                lerobot_root="/data/caobochun/openpi/data/lerobot/caobochun/zhuji_pick_and_place",
+                prompt_from_task=True,
+            ),
+            default_prompt="Move the plate to the center and put the yellow stick into it.",
+            extra_delta_transform=True,
+        ),
+        # RTC 训练使用 H=50、执行区间 s=25，并在 [0, 25] 内随机采样推理延迟 d。
         weight_loader=weight_loaders.NoOpWeightLoader(),
         pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
         num_train_steps=10_000,

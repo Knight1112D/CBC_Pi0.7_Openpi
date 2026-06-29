@@ -13,11 +13,8 @@ import tqdm
 
 import openpi.shared.normalize as normalize
 
-
 OPENPI_DIR = Path(os.environ.get("OPENPI_DIR", Path.cwd()))
-DATASET_ROOT = Path(
-    os.environ.get("LEROBOT_EXAMPLE_DATASET_ROOT", OPENPI_DIR / "data/lerobot/example/lerobot_v3_task")
-)
+DATASET_ROOT = Path(os.environ.get("LEROBOT_EXAMPLE_DATASET_ROOT", OPENPI_DIR / "data/lerobot/example/lerobot_v3_task"))
 OUTPUT_DIR = Path(
     os.environ.get(
         "LEROBOT_EXAMPLE_NORM_STATS_DIR",

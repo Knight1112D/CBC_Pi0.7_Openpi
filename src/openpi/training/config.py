@@ -19,10 +19,10 @@ import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
+import openpi.policies.lerobot_example_policy as lerobot_example_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.policies.tienkung_dual_grippers_policy as tienkung_grippers_policy
 import openpi.policies.tienkung_dual_hands_policy as tienkung_policy
-import openpi.policies.zhuji_policy as zhuji_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -568,9 +568,9 @@ class LeRobotTienkungGrippersDataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
-class LeRobotZhujiDataConfig(DataConfigFactory):
+class LeRobotExampleDataConfig(DataConfigFactory):
     """
-    配置 zhuji 机器人 LeRobot 数据在训练和推理前后的字段映射与动作变换。
+    配置通用 LeRobot 示例数据在训练和推理前后的字段映射与动作变换。
     """
 
     extra_delta_transform: bool = False
@@ -594,8 +594,8 @@ class LeRobotZhujiDataConfig(DataConfigFactory):
         )
 
         data_transforms = _transforms.Group(
-            inputs=[zhuji_policy.ZhujiInputs(model_type=model_config.model_type)],
-            outputs=[zhuji_policy.ZhujiOutputs()],
+            inputs=[lerobot_example_policy.LeRobotExampleInputs(model_type=model_config.model_type)],
+            outputs=[lerobot_example_policy.LeRobotExampleOutputs()],
         )
 
         if self.extra_delta_transform:
@@ -1229,12 +1229,12 @@ _CONFIGS = [
         num_train_steps=10_000,
     ),
     TrainConfig(
-        name="pi05_zhuji_finetune",
+        name="pi05_lerobot_example_finetune",
         model=pi0_config.Pi0Config(pi05=True),
-        data=LeRobotZhujiDataConfig(
-            repo_id="caobochun/zhuji_pick_and_place",
+        data=LeRobotExampleDataConfig(
+            repo_id="example/lerobot_v3_task",
             base_config=DataConfig(
-                lerobot_root="/data/caobochun/openpi/data/lerobot/caobochun/zhuji_pick_and_place",
+                lerobot_root="./data/lerobot/example/lerobot_v3_task",
                 prompt_from_task=True,
             ),
             default_prompt="Move the plate to the center and put the yellow stick into it.",
@@ -1242,11 +1242,11 @@ _CONFIGS = [
         ),
         # 本地 pi05_base 是 PyTorch safetensors 格式，使用 train_pytorch.py 时从这里加载。
         weight_loader=weight_loaders.NoOpWeightLoader(),
-        pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
+        pytorch_weight_path="./checkpoints/pi05_base",
         num_train_steps=10_000,
     ),
     TrainConfig(
-        name="pi05_zhuji_finetune_rtc",
+        name="pi05_lerobot_example_finetune_rtc",
         model=pi0_config.Pi0Config(
             pi05=True,
             rtc_training=pi0_config.RTCTrainingConfig(
@@ -1256,11 +1256,11 @@ _CONFIGS = [
                 execution_horizon=25,
             ),
         ),
-        data=LeRobotZhujiDataConfig(
-            repo_id="caobochun/zhuji_pick_and_place",
-            assets=AssetsConfig(assets_dir="./assets/pi05_zhuji_finetune"),
+        data=LeRobotExampleDataConfig(
+            repo_id="example/lerobot_v3_task",
+            assets=AssetsConfig(assets_dir="./assets/pi05_lerobot_example_finetune"),
             base_config=DataConfig(
-                lerobot_root="/data/caobochun/openpi/data/lerobot/caobochun/zhuji_pick_and_place",
+                lerobot_root="./data/lerobot/example/lerobot_v3_task",
                 prompt_from_task=True,
             ),
             default_prompt="Move the plate to the center and put the yellow stick into it.",
@@ -1268,7 +1268,7 @@ _CONFIGS = [
         ),
         # RTC 训练使用 H=50、执行区间 s=25，并在 [0, 25] 内随机采样推理延迟 d。
         weight_loader=weight_loaders.NoOpWeightLoader(),
-        pytorch_weight_path="/data/caobochun/openpi/checkpoints/pi05_base",
+        pytorch_weight_path="./checkpoints/pi05_base",
         num_train_steps=10_000,
     ),
     # RoboArena & PolaRiS configs.

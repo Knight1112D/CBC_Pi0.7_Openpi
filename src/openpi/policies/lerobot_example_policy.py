@@ -7,8 +7,8 @@ from openpi import transforms
 from openpi.models import model as _model
 
 
-def make_zhuji_example() -> dict:
-    """创建一条 zhuji 机器人策略的随机输入样例。"""
+def make_lerobot_example() -> dict:
+    """创建一条通用 LeRobot 示例策略的随机输入样例。"""
     return {
         # 状态顺序与 LeRobot 数据一致：左臂7 + 右臂7 + 头部2 + 左右夹爪2，共 18 维。
         "observation/state": np.random.rand(18),
@@ -29,8 +29,8 @@ def _parse_image(image) -> np.ndarray:
 
 
 @dataclasses.dataclass(frozen=True)
-class ZhujiInputs(transforms.DataTransformFn):
-    """将 zhuji 机器人数据转换为 pi0/pi0.5 模型需要的输入格式。"""
+class LeRobotExampleInputs(transforms.DataTransformFn):
+    """将 LeRobot 示例数据转换为 pi0/pi0.5 模型需要的输入格式。"""
 
     # 用于区分 pi0、pi0.5 等模型类型。
     model_type: _model.ModelType
@@ -68,9 +68,9 @@ class ZhujiInputs(transforms.DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
-class ZhujiOutputs(transforms.DataTransformFn):
-    """将模型输出裁剪回 zhuji 机器人 18 维动作。"""
+class LeRobotExampleOutputs(transforms.DataTransformFn):
+    """将模型输出裁剪回示例机器人的 18 维动作。"""
 
     def __call__(self, data: dict) -> dict:
-        # 模型动作维度为 32，zhuji 实际控制前 18 维。
+        # 模型动作维度为 32，示例数据实际控制前 18 维。
         return {"actions": np.asarray(data["actions"][:, :18])}

@@ -4,9 +4,9 @@
 set -euo pipefail
 
 OPENPI_DIR="${OPENPI_DIR:-$(pwd)}"
-RAW_DATASET="${RAW_DATASET:-${OPENPI_DIR}/data/zhuji_pick_and_place}"
+RAW_DATASET="${RAW_DATASET:-${OPENPI_DIR}/data/lerobot_v3_example}"
 LEROBOT_ROOT="${LEROBOT_ROOT:-${OPENPI_DIR}/data/lerobot}"
-REPO_ID="${REPO_ID:-caobochun/zhuji_pick_and_place}"
+REPO_ID="${REPO_ID:-example/lerobot_v3_task}"
 CONVERTER_DIR="${CONVERTER_DIR:-${OPENPI_DIR}/scripts/lerobot_conversion}"
 PYTHON="${PYTHON:-${OPENPI_DIR}/.venv/bin/python}"
 

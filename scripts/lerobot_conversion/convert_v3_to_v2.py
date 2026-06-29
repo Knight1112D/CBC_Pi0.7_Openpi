@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from collections.abc import Iterable
 import json
 import logging
 import math
@@ -37,7 +38,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from typing import Any, Iterable
+from typing import Any
 
 from huggingface_hub import snapshot_download
 import jsonlines
@@ -45,24 +46,21 @@ import numpy as np
 import pyarrow.parquet as pq
 import tqdm
 
-
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[3]))
 try:
-    from lerobot.datasets.utils import (
-        DEFAULT_CHUNK_SIZE,
-        DEFAULT_DATA_PATH,
-        DEFAULT_VIDEO_PATH,
-        EPISODES_DIR,
-        LEGACY_EPISODES_PATH,
-        LEGACY_EPISODES_STATS_PATH,
-        LEGACY_TASKS_PATH,
-        load_info,
-        load_tasks,
-        serialize_dict,
-        unflatten_dict,
-        write_info,
-    )
+    from lerobot.datasets.utils import DEFAULT_CHUNK_SIZE
+    from lerobot.datasets.utils import DEFAULT_DATA_PATH
+    from lerobot.datasets.utils import DEFAULT_VIDEO_PATH
+    from lerobot.datasets.utils import EPISODES_DIR
+    from lerobot.datasets.utils import LEGACY_EPISODES_PATH
+    from lerobot.datasets.utils import LEGACY_EPISODES_STATS_PATH
+    from lerobot.datasets.utils import LEGACY_TASKS_PATH
+    from lerobot.datasets.utils import load_info
+    from lerobot.datasets.utils import load_tasks
+    from lerobot.datasets.utils import serialize_dict
+    from lerobot.datasets.utils import unflatten_dict
+    from lerobot.datasets.utils import write_info
     from lerobot.utils.constants import HF_LEROBOT_HOME
     from lerobot.utils.utils import init_logging
 except ModuleNotFoundError as exc:
@@ -119,9 +117,7 @@ V21 = "v2.1"
 V30 = "v3.0"
 
 LEGACY_DATA_PATH_TEMPLATE = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet"
-LEGACY_VIDEO_PATH_TEMPLATE = (
-    "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4"
-)
+LEGACY_VIDEO_PATH_TEMPLATE = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4"
 
 MIN_VIDEO_DURATION = 1e-6
 
@@ -133,7 +129,7 @@ def _to_serializable(value: Any) -> Any:
         return value.tolist()
     if isinstance(value, np.generic):
         return value.item()
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_to_serializable(item) for item in value]
     if isinstance(value, dict):
         return {key: _to_serializable(val) for key, val in value.items()}
@@ -220,7 +216,7 @@ def convert_info(
     info.pop("video_files_size_in_mb", None)
 
     # Restore per-feature metadata: camera entries already contain their own fps.
-    for key, ft in info["features"].items():
+    for ft in info["features"].values():
         if ft.get("dtype") != "video":
             ft.pop("fps", None)
 
@@ -243,9 +239,7 @@ def _group_episodes_by_data_file(
     return grouped
 
 
-def convert_data(
-    root: Path, new_root: Path, episode_records: list[dict[str, Any]], chunks_size: int
-) -> None:
+def convert_data(root: Path, new_root: Path, episode_records: list[dict[str, Any]], chunks_size: int) -> None:
     logging.info("Converting consolidated parquet files back to per-episode files")
     grouped = _group_episodes_by_data_file(episode_records)
 
@@ -255,10 +249,10 @@ def convert_data(
             raise FileNotFoundError(f"Expected source parquet file not found: {source_path}")
 
         table = pq.read_table(source_path)
-        records = sorted(records, key=lambda rec: int(rec["dataset_from_index"]))
-        file_offset = int(records[0]["dataset_from_index"])
+        sorted_records = sorted(records, key=lambda rec: int(rec["dataset_from_index"]))
+        file_offset = int(sorted_records[0]["dataset_from_index"])
 
-        for record in records:
+        for record in sorted_records:
             episode_index = int(record["episode_index"])
             start = int(record["dataset_from_index"]) - file_offset
             stop = int(record["dataset_to_index"]) - file_offset
@@ -415,9 +409,7 @@ def _extract_video_segment(
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"ffmpeg timed out while processing video '{src}' -> '{dst}'") from exc
     except FileNotFoundError as exc:
-        raise RuntimeError(
-            "ffmpeg executable not found; it is required for video conversion"
-        ) from exc
+        raise RuntimeError("ffmpeg executable not found; it is required for video conversion") from exc
     except subprocess.CalledProcessError as exc:
         error_msg = f"ffmpeg failed while splitting video '{src}' into '{dst}'"
         if exc.stderr:
@@ -444,9 +436,7 @@ def convert_videos(
             logging.info("No video metadata found for key '%s'; skipping", video_key)
             continue
 
-        for (chunk_idx, file_idx), records in tqdm.tqdm(
-            grouped.items(), desc=f"convert videos ({video_key})"
-        ):
+        for (chunk_idx, file_idx), records in tqdm.tqdm(grouped.items(), desc=f"convert videos ({video_key})"):
             src_path = root / DEFAULT_VIDEO_PATH.format(
                 video_key=video_key,
                 chunk_index=chunk_idx,
@@ -455,11 +445,9 @@ def convert_videos(
             if not src_path.exists():
                 raise FileNotFoundError(f"Expected MP4 file not found: {src_path}")
 
-            records = sorted(
-                records, key=lambda rec: float(rec[f"videos/{video_key}/from_timestamp"])
-            )
+            sorted_records = sorted(records, key=lambda rec: float(rec[f"videos/{video_key}/from_timestamp"]))
 
-            for record in records:
+            for record in sorted_records:
                 episode_index = int(record["episode_index"])
                 start = float(record[f"videos/{video_key}/from_timestamp"])
                 end = float(record[f"videos/{video_key}/to_timestamp"])
@@ -496,16 +484,11 @@ def convert_episodes_metadata(new_root: Path, episode_records: list[dict[str, An
                 and key not in {"dataset_from_index", "dataset_to_index"}
             }
 
-            # Ensure legacy episodes include a length; compute from dataset indices if missing
-            if "length" not in legacy_episode:
-                if "dataset_from_index" in record and "dataset_to_index" in record:
-                    legacy_episode["length"] = int(record["dataset_to_index"]) - int(
-                        record["dataset_from_index"]
-                    )
+            # 如果旧版 episode 缺少长度字段，则从数据索引中恢复。
+            if "length" not in legacy_episode and "dataset_from_index" in record and "dataset_to_index" in record:
+                legacy_episode["length"] = int(record["dataset_to_index"]) - int(record["dataset_from_index"])
 
-            serializable_episode = {
-                key: _to_serializable(value) for key, value in legacy_episode.items()
-            }
+            serializable_episode = {key: _to_serializable(value) for key, value in legacy_episode.items()}
             episodes_writer.write(serializable_episode)
 
             stats_flat = {key: record[key] for key in record if key.startswith("stats/")}
@@ -537,6 +520,7 @@ def copy_ancillary_directories(root: Path, new_root: Path) -> None:
 def convert_dataset(
     repo_id: str,
     root: str | Path | None = None,
+    *,
     force_conversion: bool = False,
 ) -> None:
     root = HF_LEROBOT_HOME / repo_id if root is None else Path(root) / repo_id

@@ -11,7 +11,7 @@ OPENPI_DIR=/path/to/openpi \
 RAW_DATASET=/path/to/lerobot_v3_dataset \
 LEROBOT_ROOT=/path/to/lerobot_root \
 REPO_ID=owner/dataset_name \
-./scripts/lerobot_conversion/convert_zhuji_v3_to_v2.sh
+./scripts/lerobot_conversion/convert_lerobot_v3_to_v2.sh
 ```
 
 其中：

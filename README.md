@@ -10,6 +10,8 @@ The project is built on top of Physical Intelligence's open-source [`openpi`](ht
 
 This is an independent project built with deep respect for the upstream OpenPI work. Its purpose is to reproduce, integrate, and extend OpenPI-style engineering pieces that have been discussed in public materials but have not yet been released as a complete OpenPI implementation.
 
+This project also thanks the OpenTau project for useful public engineering references around later OpenPI-style training directions, including memory-conditioned policies, value/advantage labeling, and policy-family organization. In this repository those ideas are adapted behind explicit OpenPI-compatible switches so the default upstream training path remains unchanged.
+
 The original upstream OpenPI README is preserved here:
 
 - [UPSTREAM_OPENPI_README.md](UPSTREAM_OPENPI_README.md)
@@ -104,19 +106,20 @@ Next experiments:
 
 ### 4. pi0.6-Style RECAP / RL
 
-- [ ] Define generic episode metadata for success, failure, evaluation episodes, and human intervention.
-- [ ] Generate sidecar labels for `advantage_indicator`, `use_advantage`, and `is_human_intervention`.
-- [ ] Add value-proxy or progress-proxy tools for offline advantage labeling.
-- [ ] Merge RECAP sidecar fields into the dataloader without modifying the original dataset.
-- [ ] Add advantage-conditioned prompt, token, or embedding paths.
-- [ ] Add a small debug config for 1-2 step smoke tests.
+- [x] Define generic episode metadata for success, failure, evaluation episodes, and human intervention.
+- [x] Generate sidecar labels for `advantage_indicator`, `use_advantage`, and `is_human_intervention`.
+- [x] Add a code-only sidecar generator for offline advantage/RL-token labels.
+- [x] Merge RECAP sidecar fields into the dataloader without modifying the original dataset.
+- [x] Add RL-token sample weighting for PyTorch flow-matching loss.
+- [x] Add a small debug config for 1-2 step smoke tests.
 - [ ] Compare standard SFT and RECAP-style fine-tuning.
 
 ### 5. MEM / Memory
 
-- [ ] Survey public MEM-related materials and reproducible implementation clues.
-- [ ] Design optional memory/context fields for recent history, task state, failures, and recovery hints.
-- [ ] Keep memory inputs optional so existing OpenPI policies remain compatible.
+- [x] Survey public MEM-related materials and reproducible implementation clues.
+- [x] Design optional memory/context fields for recent history, task state, failures, and recovery hints.
+- [x] Keep memory inputs optional so existing OpenPI policies remain compatible.
+- [x] Add optional sidecar memory-to-prompt augmentation for debug runs.
 - [ ] Evaluate behavior with and without memory context.
 
 ### 6. pi0.7-Inspired World Model

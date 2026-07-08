@@ -11,6 +11,8 @@
 - pi0.6 风格的 RECAP、RL 和 MEM。
 - pi0.7-inspired 世界模型和长时程交互方向。
 
+本项目也感谢 OpenTau 项目在后续 OpenPI 风格训练方向上的工程参考价值。本仓库当前采用 OpenPI 兼容的配置开关和 sidecar 数据流来吸收相关思路，保持默认训练路径不变。
+
 ## 当前状态
 
 - 已保留上游 OpenPI 的署名、许可证和引用信息。
@@ -40,6 +42,25 @@
 - `rtc_chunker_test.py` 通过。
 - `simulate_rtc_replay.py` hard-prefix smoke 通过。
 
+## 2026-07-08 进展：RECAP / MEM / RL token / 知识隔离训练扩展
+
+本轮在本地 GitHub 发布版本中补齐了四个训练相关兼容层，目标是让后续 pi0.6 风格实验可以接入现有 OpenPI PyTorch pi0.5 路线，同时不改变默认训练行为。
+
+已完成内容：
+
+- 新增 `openpi.training.cbc_training`，集中管理 RECAP sidecar、MEM prompt augmentation、RL token loss weighting 和知识隔离参数冻结工具。
+- 新增 `scripts/cbc_make_recap_sidecar.py`，可从 episode metadata 与人工干预区间生成 `advantage_indicator`、`use_advantage`、`is_human_intervention`、`rl_token_weight` 等 JSONL 标签。
+- `DataConfig` 新增默认关闭的 `sidecar` 配置；dataloader 会在不改原始 LeRobot 数据集的情况下合并 sidecar 字段，并把 `cbc_` 数值字段作为 metadata 返回训练循环。
+- `TrainConfig` 新增默认关闭的 `rl_token` 与 `knowledge_insulation` 配置；PyTorch 训练循环兼容二元/三元 batch，支持基于 sidecar 的样本级 loss 加权和 VLM/action-expert 参数冻结。
+- 新增 `pi05_lerobot_example_recap_mem_rl_debug`，用于 1-2 step 的 RECAP/MEM/RL token/知识隔离 smoke 配置。
+- 新增 `src/openpi/training/cbc_training_test.py`，覆盖 sidecar 注入、RL token 权重和知识隔离冻结。
+
+待验证/后续：
+
+- 在真实 LeRobot 数据上生成 sidecar，并跑 `pi05_lerobot_example_recap_mem_rl_debug` 2 step smoke。
+- 对比普通 SFT、RECAP sidecar 加权、MEM prompt augmentation、知识隔离冻结的离线评估指标。
+- 如果后续要加入 value proxy，需要把 value 分数写入 sidecar，再统一转为 `advantage_indicator` 或 `rl_token_weight`。
+
 ## 待办列表
 
 - [x] 实现基础人形机器人 observation/action 接口和天工双手示例路径。
@@ -50,8 +71,11 @@
 - [ ] 做离线 delay sweep：`d=0..25, s=25`。
 - [ ] 对比普通 async、fixed-horizon RTC、delay-adaptive RTC、suffix soft blending、training-time RTC hard-prefix 和历史 inference-time guidance。
 - [ ] 设计 RECAP metadata 和 sidecar label 格式。
-- [ ] 增加 RECAP debug config 和 1-2 step smoke test。
-- [ ] 设计可选 MEM/context 输入字段。
+- [x] 设计 RECAP metadata 和 sidecar label 格式。
+- [x] 增加 RECAP debug config 和 1-2 step smoke test 配置。
+- [x] 设计可选 MEM/context 输入字段。
+- [x] 增加 RL token 样本级 loss weighting。
+- [x] 增加知识隔离参数冻结开关，并保留已有实现。
 - [ ] 总结 pi0.7 公开概念，并清楚标注本项目的工程假设。
 - [ ] 继续保持平台专用机器人桥接代码与 OpenPI 核心复现代码解耦。
 

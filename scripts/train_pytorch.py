@@ -43,6 +43,7 @@ import wandb
 import openpi.models.pi0_config
 import openpi.models_pytorch.pi0_pytorch
 import openpi.shared.normalize as _normalize
+import openpi.training.cbc_training as _cbc_training
 import openpi.training.config as _config
 import openpi.training.data_loader as _data
 
@@ -408,6 +409,13 @@ def train_loop(config: _config.TrainConfig):
         object.__setattr__(model_cfg, "dtype", config.pytorch_training_precision)
 
     model = openpi.models_pytorch.pi0_pytorch.PI0Pytorch(model_cfg).to(device)
+    ki_stats = _cbc_training.apply_knowledge_insulation(model, config.knowledge_insulation)
+    if is_main and config.knowledge_insulation.enabled:
+        logging.info(
+            "Knowledge insulation enabled: trainable_params=%d frozen_params=%d",
+            ki_stats["trainable"],
+            ki_stats["frozen"],
+        )
 
     if hasattr(model, "gradient_checkpointing_enable"):
         enable_gradient_checkpointing = True
@@ -457,7 +465,7 @@ def train_loop(config: _config.TrainConfig):
 
     # Create optimizer with config parameters
     optim = torch.optim.AdamW(
-        model.parameters(),
+        (param for param in model.parameters() if param.requires_grad),
         lr=peak_lr,
         betas=(config.optimizer.b1, config.optimizer.b2),
         eps=config.optimizer.eps,
@@ -512,10 +520,18 @@ def train_loop(config: _config.TrainConfig):
         if use_ddp and hasattr(loader, "set_epoch"):
             loader.set_epoch(global_step // len(loader))
 
-        for observation, actions in loader:
+        for batch in loader:
             # Check if we've reached the target number of steps
             if global_step >= config.num_train_steps:
                 break
+
+            # 默认数据流返回二元组；启用 CBC sidecar 后会多返回 metadata。
+            if len(batch) == 3:
+                observation, actions, metadata = batch
+                metadata = {key: value.to(device) for key, value in metadata.items()}
+            else:
+                observation, actions = batch
+                metadata = None
 
             # The unified data loader returns (observation, actions) tuple
             observation = jax.tree.map(lambda x: x.to(device), observation)  # noqa: PLW2901
@@ -534,6 +550,8 @@ def train_loop(config: _config.TrainConfig):
             elif not isinstance(losses, torch.Tensor):
                 losses = torch.tensor(losses, device=device, dtype=torch.float32)
 
+            rl_weights = _cbc_training.make_rl_token_weights(metadata, config.rl_token)
+            losses = _cbc_training.apply_loss_weights(losses, rl_weights)
             loss = losses.mean()
 
             # Backward pass

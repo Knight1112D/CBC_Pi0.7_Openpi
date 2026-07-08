@@ -98,7 +98,12 @@ class RepackTransform(DataTransformFn):
 
     def __call__(self, data: DataDict) -> DataDict:
         flat_item = flatten_dict(data)
-        return jax.tree.map(lambda k: flat_item[k], self.structure)
+        output = jax.tree.map(lambda k: flat_item[k], self.structure)
+        # CBC 训练扩展字段使用 cbc_ 前缀；repack 后保留这些字段，便于 RECAP/MEM/RL token 走 sidecar。
+        for key, value in data.items():
+            if isinstance(key, str) and key.startswith("cbc_"):
+                output[key] = value
+        return output
 
 
 @dataclasses.dataclass(frozen=True)

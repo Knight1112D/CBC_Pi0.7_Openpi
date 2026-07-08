@@ -13,6 +13,7 @@ import torch
 
 import openpi.models.model as _model
 import openpi.training.config as _config
+import openpi.training.cbc_training as _cbc_training
 from openpi.training.droid_rlds_dataset import DroidRldsDataset
 import openpi.transforms as _transforms
 
@@ -146,6 +147,13 @@ def create_torch_dataset(
         },
     )
 
+    if data_config.sidecar.enabled:
+        dataset = _cbc_training.SidecarDataset(
+            dataset,
+            _cbc_training.read_sidecar(data_config.sidecar.path),
+            include_text=data_config.sidecar.append_memory_to_prompt,
+        )
+
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
 
@@ -186,6 +194,7 @@ def transform_dataset(dataset: Dataset, data_config: _config.DataConfig, *, skip
         [
             *data_config.repack_transforms.inputs,
             *data_config.data_transforms.inputs,
+            *([_cbc_training.AppendMemoryToPrompt()] if data_config.sidecar.append_memory_to_prompt else []),
             _transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
             *data_config.model_transforms.inputs,
         ],
@@ -538,4 +547,14 @@ class DataLoaderImpl(DataLoader):
 
     def __iter__(self):
         for batch in self._data_loader:
-            yield _model.Observation.from_dict(batch), batch["actions"]
+            metadata = {}
+            for key in list(batch.keys()):
+                if _cbc_training.is_cbc_key(key):
+                    value = batch.pop(key)
+                    if key in _cbc_training.NUMERIC_METADATA_KEYS:
+                        metadata[key] = value
+            observation = _model.Observation.from_dict(batch)
+            if metadata:
+                yield observation, batch["actions"], metadata
+            else:
+                yield observation, batch["actions"]

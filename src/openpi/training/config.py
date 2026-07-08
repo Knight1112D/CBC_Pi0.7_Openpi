@@ -26,6 +26,7 @@ import openpi.policies.tienkung_dual_hands_policy as tienkung_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
+import openpi.training.cbc_training as cbc_training
 import openpi.training.misc.polaris_config as polaris_config
 import openpi.training.misc.roboarena_config as roboarena_config
 import openpi.training.optimizer as _optimizer
@@ -94,6 +95,9 @@ class DataConfig:
 
     # If true, will use the LeRobot dataset task to define the prompt.
     prompt_from_task: bool = False
+
+    # CBC sidecar 标签配置；默认关闭，避免影响原始 OpenPI 数据流。
+    sidecar: cbc_training.SidecarConfig = dataclasses.field(default_factory=cbc_training.SidecarConfig)
 
     # Only used for RLDS data loader (ie currently only used for DROID).
     rlds_data_dir: str | None = None
@@ -684,6 +688,12 @@ class TrainConfig:
     # Used to pass metadata to the policy server.
     policy_metadata: dict[str, Any] | None = None
 
+    # CBC 训练扩展；默认关闭，显式配置后才参与训练。
+    rl_token: cbc_training.RLTokenConfig = dataclasses.field(default_factory=cbc_training.RLTokenConfig)
+    knowledge_insulation: cbc_training.KnowledgeInsulationConfig = dataclasses.field(
+        default_factory=cbc_training.KnowledgeInsulationConfig
+    )
+
     # If the value is greater than 1, FSDP will be enabled and shard across number of specified devices; overall
     # device memory will be reduced but training could potentially be slower.
     # eg. if total device is 4 and fsdp devices is 2; then the model will shard to 2 devices and run
@@ -1270,6 +1280,50 @@ _CONFIGS = [
         weight_loader=weight_loaders.NoOpWeightLoader(),
         pytorch_weight_path="./checkpoints/pi05_base",
         num_train_steps=10_000,
+    ),
+    TrainConfig(
+        name="pi05_lerobot_example_recap_mem_rl_debug",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            rtc_training=pi0_config.RTCTrainingConfig(
+                enabled=True,
+                min_prefix_steps=0,
+                max_prefix_steps=25,
+                execution_horizon=25,
+            ),
+        ),
+        data=LeRobotExampleDataConfig(
+            repo_id="example/lerobot_v3_task",
+            assets=AssetsConfig(assets_dir="./assets/pi05_lerobot_example_finetune"),
+            base_config=DataConfig(
+                lerobot_root="./data/lerobot/example/lerobot_v3_task",
+                prompt_from_task=True,
+                sidecar=cbc_training.SidecarConfig(
+                    enabled=True,
+                    path="./data/sidecars/lerobot_example_recap.jsonl",
+                    append_memory_to_prompt=True,
+                ),
+            ),
+            default_prompt="Move the plate to the center and put the yellow stick into it.",
+            extra_delta_transform=True,
+        ),
+        rl_token=cbc_training.RLTokenConfig(
+            enabled=True,
+            positive_weight=1.25,
+            negative_weight=0.75,
+            intervention_weight=1.5,
+        ),
+        knowledge_insulation=cbc_training.KnowledgeInsulationConfig(
+            enabled=True,
+            freeze_vlm=True,
+            train_action_expert=True,
+            train_action_projections=True,
+        ),
+        weight_loader=weight_loaders.NoOpWeightLoader(),
+        pytorch_weight_path="./checkpoints/pi05_base",
+        batch_size=2,
+        num_train_steps=2,
+        wandb_enabled=False,
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
